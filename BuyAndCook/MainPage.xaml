@@ -1,0 +1,11 @@
+<ContentPage xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+             x:Class="BuyAndCook.MainPage">
+
+    <VerticalStackLayout Padding="30" Spacing="25">
+        <Label Text="BuyAndCook" FontSize="32" HorizontalOptions="Center" />
+        <Button Text="Обрати рецепти" />
+        <Button Text="Створити список покупок" />
+    </VerticalStackLayout>
+
+</ContentPage>
