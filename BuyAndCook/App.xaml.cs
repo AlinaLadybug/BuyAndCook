@@ -1,10 +1,11 @@
-namespace BuyAndCook;
+﻿namespace BuyAndCook;
 
 public partial class App : Application
 {
-    public App()
-    {
-        InitializeComponent();
-        MainPage = new MainPage();
-    }
+	public App()
+	{
+		InitializeComponent();
+
+		MainPage = new AppShell();
+	}
 }

@@ -1,11 +1,57 @@
+﻿<?xml version="1.0" encoding="utf-8" ?>
 <ContentPage xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
              xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+             xmlns:viewmodels="clr-namespace:BuyAndCook.ViewModels"
              x:Class="BuyAndCook.MainPage">
 
-    <VerticalStackLayout Padding="30" Spacing="25">
-        <Label Text="BuyAndCook" FontSize="32" HorizontalOptions="Center" />
-        <Button Text="Обрати рецепти" />
-        <Button Text="Створити список покупок" />
-    </VerticalStackLayout>
+    <ContentPage.BindingContext>
+        <viewmodels:MainViewModel />
+    </ContentPage.BindingContext>
+
+    <ScrollView>
+        <VerticalStackLayout Spacing="25" Padding="30,0" VerticalOptions="Center">
+
+            <Label 
+                Text="Buy and Cook"
+                SemanticProperties.HeadingLevel="Level1"
+                FontSize="32"
+                HorizontalOptions="Center" />
+
+            <Label 
+                Text="Your Recipes"
+                SemanticProperties.HeadingLevel="Level2"
+                FontSize="18"
+                HorizontalOptions="Start" />
+
+            <CollectionView ItemsSource="{Binding Recipes}">
+                <CollectionView.ItemTemplate>
+                    <DataTemplate>
+                        <Frame Margin="0,5" Padding="10">
+                            <Label Text="{Binding Name}" FontSize="16" />
+                        </Frame>
+                    </DataTemplate>
+                </CollectionView.ItemTemplate>
+            </CollectionView>
+
+            <Button 
+                Text="Generate Shopping List"
+                Command="{Binding GenerateShoppingListCommand}"
+                HorizontalOptions="Center" />
+
+            <Label 
+                Text="Shopping List"
+                SemanticProperties.HeadingLevel="Level2"
+                FontSize="18"
+                HorizontalOptions="Start" />
+
+            <Frame Padding="10" BorderColor="Gray">
+                <Label 
+                    Text="{Binding ShoppingListText}"
+                    FontSize="14"
+                    LineBreakMode="WordWrap" />
+            </Frame>
+
+        </VerticalStackLayout>
+    </ScrollView>
 
 </ContentPage>
