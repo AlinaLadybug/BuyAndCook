@@ -60,13 +60,32 @@ async function findFirstVisible(page, selectors) {
 }
 
 async function main() {
-  const browser = await chromium.launch({ headless: true });
-  const context = await browser.newContext({
+  const headless = process.env.SILPO_HEADLESS !== 'false';
+  const storageStatePath = process.env.SILPO_STORAGE_STATE;
+  const browser = await chromium.launch({ headless });
+  const contextOptions = {
     recordHar: { path: harPath, content: 'attach' },
     locale: 'uk-UA',
     timezoneId: 'Europe/Kyiv',
     viewport: { width: 1440, height: 900 }
-  });
+  };
+
+  if (storageStatePath) {
+    contextOptions.storageState = storageStatePath;
+  }
+
+  const context = await browser.newContext(contextOptions);
+
+  if (process.env.SILPO_COOKIES_JSON) {
+    try {
+      const cookies = JSON.parse(process.env.SILPO_COOKIES_JSON);
+      if (Array.isArray(cookies) && cookies.length > 0) {
+        await context.addCookies(cookies);
+      }
+    } catch (error) {
+      console.warn('Failed to parse SILPO_COOKIES_JSON; ignoring.');
+    }
+  }
 
   await context.tracing.start({ screenshots: true, snapshots: true, sources: true });
 
@@ -79,8 +98,34 @@ async function main() {
     'button:has-text("Accept")'
   ]);
 
+  await clickIfVisible(page, [
+    'button[aria-label*="Пошук"]',
+    'button[aria-label*="пошук"]',
+    'button[aria-label*="search"]',
+    'button:has-text("Пошук")',
+    'button[data-testid*="search"]'
+  ]);
+
+  const challengeInput = page.locator('input[name=\"cf-turnstile-response\"]');
+  if (await challengeInput.count()) {
+    await page.screenshot({ path: path.join(artifactsDir, 'silpo-challenge.png'), fullPage: true });
+    throw new Error('Cloudflare challenge detected. Provide SILPO_STORAGE_STATE or SILPO_COOKIES_JSON to continue.');
+  }
+
   const searchInput = await findFirstVisible(page, searchSelectors);
   if (!searchInput) {
+    const inputs = await page.$$eval('input', (elements) =>
+      elements.map((input) => ({
+        type: input.type,
+        name: input.name,
+        id: input.id,
+        placeholder: input.placeholder,
+        ariaLabel: input.getAttribute('aria-label'),
+        className: input.className
+      }))
+    );
+    fs.writeFileSync(path.join(artifactsDir, 'inputs.json'), JSON.stringify(inputs, null, 2));
+    await page.screenshot({ path: path.join(artifactsDir, 'silpo-no-search.png'), fullPage: true });
     throw new Error('Search input not found. Update selectors in scripts/silpo-capture.js.');
   }
 
