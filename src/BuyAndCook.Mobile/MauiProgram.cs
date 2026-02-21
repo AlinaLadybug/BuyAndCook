@@ -1,4 +1,5 @@
 ﻿using BuyAndCook.Application.Abstractions;
+using BuyAndCook.Application.Models.Silpo;
 using BuyAndCook.Application.Services;
 using BuyAndCook.Data;
 using BuyAndCook.Infrastructure.Integrations;
@@ -38,9 +39,16 @@ public static class MauiProgram
 		builder.Services.AddSingleton<SqliteConnectionFactory>();
 		builder.Services.AddSingleton<IMealPlanRepository, SqliteMealPlanRepository>();
 		builder.Services.AddSingleton<IIngredientMappingRepository, SqliteIngredientMappingRepository>();
+		builder.Services.AddSingleton<ISilpoSessionRepository, SqliteSilpoSessionRepository>();
 
 		builder.Services.AddSingleton<IGroceryProvider, SilpoGroceryProvider>();
 		builder.Services.AddSingleton<IGroceryProviderRegistry, GroceryProviderRegistry>();
+		builder.Services.AddSingleton(new SilpoApiSettings());
+		builder.Services.AddSingleton(new HttpClient());
+		builder.Services.AddSingleton<SilpoApiClient>();
+		builder.Services.AddSingleton<ISilpoLocationService>(sp => sp.GetRequiredService<SilpoApiClient>());
+		builder.Services.AddSingleton<ISilpoProductSearchService>(sp => sp.GetRequiredService<SilpoApiClient>());
+		builder.Services.AddSingleton<ISilpoCartService>(sp => sp.GetRequiredService<SilpoApiClient>());
 
 #if DEBUG
 		builder.Logging.AddDebug();

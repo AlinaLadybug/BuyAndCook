@@ -136,6 +136,11 @@ namespace BuyAndCook.Infrastructure.Integrations
 
             foreach (var branch in branches)
             {
+                if (Math.Abs(branch.Latitude) < 0.0001 && Math.Abs(branch.Longitude) < 0.0001)
+                {
+                    continue;
+                }
+
                 var distance = HaversineDistance(latitude, longitude, branch.Latitude, branch.Longitude);
                 if (distance < nearestDistance)
                 {
