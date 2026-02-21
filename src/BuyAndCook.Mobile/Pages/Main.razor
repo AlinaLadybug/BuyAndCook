@@ -1,7 +1,9 @@
 @page "/"
 @using BuyAndCook.Application.Abstractions
+@using BuyAndCook.Application.Models.Silpo
 @using BuyAndCook.Application.Services
 @using BuyAndCook.Domain.Models
+@using System.Globalization
 @using System.Linq
 @inject IRecipeProvider RecipeProvider
 @inject ShoppingListGenerator ShoppingListGenerator
@@ -10,6 +12,11 @@
 @inject IClipboardService ClipboardService
 @inject IMealPlanRepository MealPlanRepository
 @inject IIngredientMappingRepository IngredientMappingRepository
+@inject ISilpoLocationService SilpoLocationService
+@inject ISilpoProductSearchService SilpoProductSearchService
+@inject ISilpoCartService SilpoCartService
+@inject ISilpoSessionRepository SilpoSessionRepository
+@inject SilpoApiSettings SilpoApiSettings
 
 <PageTitle>Buy and Cook</PageTitle>
 
@@ -175,6 +182,129 @@
             </div>
         }
     </section>
+
+    <section class="section">
+        <div class="section-head">
+            <h2>Silpo API</h2>
+            <p>Search products, create carts, and sync your nearest branch.</p>
+        </div>
+
+        @if (!string.IsNullOrWhiteSpace(_silpoError))
+        {
+            <div class="error">@_silpoError</div>
+        }
+
+        <div class="silpo-api">
+            <div class="silpo-card">
+                <h3>Location</h3>
+                <p class="meta">Find the nearest Silpo branch by address.</p>
+                <div class="silpo-form">
+                    <input class="input" placeholder="Enter address (city, street, house)" @bind="_addressQuery" />
+                    <button class="btn outline" @onclick="SearchAddressAsync" disabled="@(_locationBusy || string.IsNullOrWhiteSpace(_addressQuery))">Search</button>
+                </div>
+
+                @if (_addressSuggestions.Count > 0)
+                {
+                    <div class="silpo-suggestions">
+                        @foreach (var suggestion in _addressSuggestions)
+                        {
+                            <div class="silpo-suggestion">
+                                <div>
+                                    <div class="title">@suggestion.Address</div>
+                                    <div class="meta">@suggestion.City @suggestion.District</div>
+                                </div>
+                                <button class="btn outline" @onclick="() => SelectAddressAsync(suggestion)">Use</button>
+                            </div>
+                        }
+                    </div>
+                }
+
+                @if (_selectedAddress != null)
+                {
+                    <div class="silpo-selection">
+                        <div class="title">@_selectedAddress.Address</div>
+                        <div class="meta">@_selectedAddress.Latitude.ToString("F5", CultureInfo.InvariantCulture), @_selectedAddress.Longitude.ToString("F5", CultureInfo.InvariantCulture)</div>
+                        @if (_selectedBranch != null)
+                        {
+                            <div class="meta">Branch: @_selectedBranch.BranchId @(!string.IsNullOrWhiteSpace(_selectedBranch.AddressFull) ? $"- {_selectedBranch.AddressFull}" : string.Empty)</div>
+                        }
+                    </div>
+                }
+
+                @if (!string.IsNullOrWhiteSpace(_locationStatus))
+                {
+                    <div class="meta">@_locationStatus</div>
+                }
+            </div>
+
+            <div class="silpo-card">
+                <h3>Cart</h3>
+                <p class="meta">Create and refresh a Silpo cart for the selected branch.</p>
+                <div class="silpo-actions">
+                    <button class="btn primary" @onclick="CreateCartAsync" disabled="@(!CanCreateCart)">Create cart</button>
+                    <button class="btn outline" @onclick="RefreshCartAsync" disabled="@(!HasCart)">Refresh</button>
+                    <button class="btn outline" @onclick="ClearCartAsync" disabled="@(!HasCart)">Clear</button>
+                </div>
+
+                @if (HasCart && _cart != null)
+                {
+                    <div class="silpo-cart">
+                        <div class="meta">Cart ID: @_cart.Id</div>
+                        <div class="silpo-cart-items">
+                            @foreach (var item in GetCartItems())
+                            {
+                                <div class="silpo-cart-item">
+                                    <span>@item.Data.Title</span>
+                                    <span>@item.Quantity.ToString("0.##", CultureInfo.InvariantCulture) × @item.Price.ToString("0.##", CultureInfo.InvariantCulture)</span>
+                                </div>
+                            }
+                        </div>
+                        <div class="silpo-cart-total">Total: @GetCartTotal().ToString("0.##", CultureInfo.InvariantCulture)</div>
+                    </div>
+                }
+                else
+                {
+                    <div class="empty">No cart loaded yet.</div>
+                }
+            </div>
+        </div>
+
+        <div class="silpo-card">
+            <h3>Product search</h3>
+            <div class="silpo-form">
+                <input class="input" placeholder="Search products in Silpo" @bind="_productQuery" />
+                <button class="btn outline" @onclick="SearchProductsAsync" disabled="@(_searchBusy || string.IsNullOrWhiteSpace(_productQuery))">Search</button>
+            </div>
+
+            @if (_productResults?.Items.Count > 0)
+            {
+                <div class="silpo-product-list">
+                    @foreach (var product in _productResults.Items)
+                    {
+                        <div class="silpo-product">
+                            @if (!string.IsNullOrWhiteSpace(product.ImageUrl))
+                            {
+                                <img src="@product.ImageUrl" alt="@product.Title" />
+                            }
+                            <div>
+                                <div class="title">@product.Title</div>
+                                <div class="meta">@(product.DisplayPrice?.ToString("0.##", CultureInfo.InvariantCulture) ?? "-") @product.DisplayRatio</div>
+                                <div class="meta">Stock: @product.Stock</div>
+                            </div>
+                            <div class="silpo-product-actions">
+                                <input class="input silpo-qty" type="number" min="@GetMinQuantity(product).ToString(CultureInfo.InvariantCulture)" step="@GetStepQuantity(product).ToString(CultureInfo.InvariantCulture)" value="@GetQuantityValue(product)" @oninput="e => UpdateQuantity(product, e.Value?.ToString())" />
+                                <button class="btn outline" @onclick="() => AddToCartAsync(product)" disabled="@(!HasCart || _cartBusy)">Add</button>
+                            </div>
+                        </div>
+                    }
+                </div>
+            }
+            else
+            {
+                <div class="empty">Search for products to add them to the cart.</div>
+            }
+        </div>
+    </section>
 </div>
 
 @code {
@@ -186,6 +316,20 @@
     private string _silpoQueries = string.Empty;
     private readonly List<SilpoMappingEdit> _silpoMappingEdits = new();
     private bool _silpoMappingsDirty;
+    private SilpoSession? _silpoSession;
+    private string _addressQuery = string.Empty;
+    private readonly List<SilpoAddressSuggestion> _addressSuggestions = new();
+    private SilpoAddressSuggestion? _selectedAddress;
+    private SilpoBranch? _selectedBranch;
+    private string _locationStatus = string.Empty;
+    private string _productQuery = string.Empty;
+    private SilpoProductSearchResult? _productResults;
+    private readonly Dictionary<string, decimal> _productQuantities = new();
+    private SilpoCart? _cart;
+    private bool _locationBusy;
+    private bool _searchBusy;
+    private bool _cartBusy;
+    private string _silpoError = string.Empty;
 
     protected override async Task OnInitializedAsync()
     {
@@ -199,6 +343,8 @@
                 _selectedIds.Add(item.RecipeId);
             }
         }
+
+        await LoadSilpoSessionAsync();
     }
 
     private async Task ToggleRecipeAsync(string id)
@@ -395,6 +541,403 @@
     private IGroceryProvider? GetSilpoProvider()
     {
         return GroceryProviderRegistry.GetProvider("silpo") ?? GroceryProviderRegistry.GetProviders().FirstOrDefault();
+    }
+
+    private bool HasCart => !string.IsNullOrWhiteSpace(_silpoSession?.CartId);
+
+    private bool CanCreateCart =>
+        !_cartBusy &&
+        _selectedAddress != null &&
+        !string.IsNullOrWhiteSpace(_selectedAddress.HouseNumber) &&
+        _selectedBranch != null;
+
+    private async Task LoadSilpoSessionAsync()
+    {
+        _silpoSession = await SilpoSessionRepository.GetSessionAsync();
+        if (_silpoSession?.Location != null)
+        {
+            _selectedAddress = new SilpoAddressSuggestion
+            {
+                Address = _silpoSession.Location.AddressLine,
+                City = _silpoSession.Location.City,
+                Street = _silpoSession.Location.Street,
+                HouseNumber = _silpoSession.Location.House,
+                District = _silpoSession.Location.District,
+                Latitude = _silpoSession.Location.Latitude,
+                Longitude = _silpoSession.Location.Longitude
+            };
+
+            _locationStatus = "Loaded saved location.";
+        }
+
+        if (!string.IsNullOrWhiteSpace(_silpoSession?.BranchId))
+        {
+            _selectedBranch = new SilpoBranch
+            {
+                BranchId = _silpoSession.BranchId ?? string.Empty,
+                CompanyId = SilpoApiSettings.CompanyId,
+                AddressFull = "Saved branch"
+            };
+        }
+
+        if (!string.IsNullOrWhiteSpace(_silpoSession?.CartId))
+        {
+            _cart = await SilpoCartService.GetCartAsync(_silpoSession.CartId ?? string.Empty);
+        }
+    }
+
+    private async Task SearchAddressAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_addressQuery))
+        {
+            return;
+        }
+
+        _locationBusy = true;
+        _silpoError = string.Empty;
+        _locationStatus = string.Empty;
+        _addressSuggestions.Clear();
+
+        try
+        {
+            var suggestions = await SilpoLocationService.SearchAddressesAsync(_addressQuery);
+            _addressSuggestions.AddRange(suggestions);
+            if (_addressSuggestions.Count == 0)
+            {
+                _locationStatus = "No addresses found.";
+            }
+        }
+        catch
+        {
+            _silpoError = "Unable to search addresses.";
+        }
+        finally
+        {
+            _locationBusy = false;
+        }
+    }
+
+    private async Task SelectAddressAsync(SilpoAddressSuggestion suggestion)
+    {
+        _selectedAddress = suggestion;
+        _addressSuggestions.Clear();
+        _locationBusy = true;
+        _silpoError = string.Empty;
+        _locationStatus = "Resolving nearest branch...";
+
+        try
+        {
+            var polygon = await SilpoLocationService.FindBranchByCoordinatesAsync(suggestion.Latitude, suggestion.Longitude);
+            if (polygon != null && !string.IsNullOrWhiteSpace(polygon.BranchId))
+            {
+                _selectedBranch = new SilpoBranch
+                {
+                    BranchId = polygon.BranchId,
+                    CompanyId = SilpoApiSettings.CompanyId,
+                    AddressFull = polygon.BranchName
+                };
+            }
+            else
+            {
+                _selectedBranch = await SilpoLocationService.FindNearestBranchAsync(suggestion.Latitude, suggestion.Longitude);
+                if (_selectedBranch != null && string.IsNullOrWhiteSpace(_selectedBranch.CompanyId))
+                {
+                    _selectedBranch = new SilpoBranch
+                    {
+                        BranchId = _selectedBranch.BranchId,
+                        CompanyId = SilpoApiSettings.CompanyId,
+                        AddressFull = _selectedBranch.AddressFull,
+                        CityFull = _selectedBranch.CityFull,
+                        ExternalId = _selectedBranch.ExternalId,
+                        HasPickup = _selectedBranch.HasPickup,
+                        Latitude = _selectedBranch.Latitude,
+                        Longitude = _selectedBranch.Longitude,
+                        Open = _selectedBranch.Open
+                    };
+                }
+            }
+
+            _locationStatus = _selectedBranch == null
+                ? "No branch found for this location."
+                : $"Nearest branch: {_selectedBranch.BranchId}";
+
+            await SaveSilpoSessionAsync(polygon?.DeliveryType);
+        }
+        catch
+        {
+            _silpoError = "Unable to resolve branch.";
+        }
+        finally
+        {
+            _locationBusy = false;
+        }
+    }
+
+    private async Task CreateCartAsync()
+    {
+        if (_selectedAddress == null || _selectedBranch == null)
+        {
+            _silpoError = "Select a location before creating a cart.";
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(_selectedAddress.HouseNumber))
+        {
+            _silpoError = "Address must include a house number.";
+            return;
+        }
+
+        _cartBusy = true;
+        _silpoError = string.Empty;
+
+        try
+        {
+            var deliveryType = _silpoSession?.DeliveryType ?? SilpoApiSettings.DefaultDeliveryType;
+            var deliveryProvider = _silpoSession?.DeliveryProvider ?? SilpoApiSettings.DefaultDeliveryProvider;
+            var draft = new SilpoCartDraft
+            {
+                Address = new SilpoCartAddress
+                {
+                    City = _selectedAddress.City,
+                    Street = _selectedAddress.Street,
+                    House = _selectedAddress.HouseNumber,
+                    District = _selectedAddress.District,
+                    Latitude = _selectedAddress.Latitude,
+                    Longitude = _selectedAddress.Longitude,
+                    BranchIdWideassort = SilpoApiSettings.WideAssortBranchId,
+                    DeliveryProvider = deliveryProvider
+                },
+                DeliveryType = deliveryType,
+                DeliveryProvider = deliveryProvider,
+                Shipments = new List<SilpoCartShipment>
+                {
+                    new SilpoCartShipment
+                    {
+                        BranchId = _selectedBranch.BranchId,
+                        CompanyId = string.IsNullOrWhiteSpace(_selectedBranch.CompanyId)
+                            ? SilpoApiSettings.CompanyId
+                            : _selectedBranch.CompanyId
+                    }
+                }
+            };
+
+            var cartId = await SilpoCartService.CreateCartAsync(draft);
+            await SaveSilpoSessionAsync(deliveryType, cartId);
+            _cart = await SilpoCartService.GetCartAsync(cartId);
+        }
+        catch
+        {
+            _silpoError = "Unable to create cart.";
+        }
+        finally
+        {
+            _cartBusy = false;
+        }
+    }
+
+    private async Task RefreshCartAsync()
+    {
+        if (!HasCart)
+        {
+            return;
+        }
+
+        _cart = await SilpoCartService.GetCartAsync(_silpoSession?.CartId ?? string.Empty);
+    }
+
+    private async Task ClearCartAsync()
+    {
+        _cart = null;
+        if (_silpoSession == null)
+        {
+            return;
+        }
+
+        _silpoSession = new SilpoSession
+        {
+            Location = _silpoSession.Location,
+            BranchId = _silpoSession.BranchId,
+            DeliveryType = _silpoSession.DeliveryType,
+            DeliveryProvider = _silpoSession.DeliveryProvider,
+            CartId = null
+        };
+
+        await SilpoSessionRepository.SaveSessionAsync(_silpoSession);
+    }
+
+    private async Task SearchProductsAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_productQuery))
+        {
+            return;
+        }
+
+        _searchBusy = true;
+        _silpoError = string.Empty;
+
+        try
+        {
+            var branchId = _selectedBranch?.BranchId
+                           ?? _silpoSession?.BranchId
+                           ?? SilpoApiSettings.DefaultBranchId;
+            _productResults = await SilpoProductSearchService.QuickSearchAsync(branchId, _productQuery, 20, 0, "productsList", "asc");
+            _productQuantities.Clear();
+            foreach (var product in _productResults.Items)
+            {
+                _productQuantities[product.Id] = GetMinQuantity(product);
+            }
+        }
+        catch
+        {
+            _silpoError = "Unable to search products.";
+        }
+        finally
+        {
+            _searchBusy = false;
+        }
+    }
+
+    private async Task AddToCartAsync(SilpoProductSummary product)
+    {
+        if (!HasCart)
+        {
+            _silpoError = "Create a cart before adding products.";
+            return;
+        }
+
+        var quantity = GetQuantity(product);
+        if (quantity <= 0)
+        {
+            _silpoError = "Quantity must be greater than zero.";
+            return;
+        }
+
+        _cartBusy = true;
+        _silpoError = string.Empty;
+
+        try
+        {
+            var request = new SilpoCartProductRequest
+            {
+                ProductId = product.Id,
+                Quantity = quantity,
+                BranchId = string.IsNullOrWhiteSpace(product.BranchId)
+                    ? _selectedBranch?.BranchId ?? _silpoSession?.BranchId ?? SilpoApiSettings.DefaultBranchId
+                    : product.BranchId,
+                CompanyId = string.IsNullOrWhiteSpace(product.CompanyId) ? SilpoApiSettings.CompanyId : product.CompanyId
+            };
+
+            await SilpoCartService.AddProductsAsync(_silpoSession?.CartId ?? string.Empty, new[] { request });
+            await RefreshCartAsync();
+        }
+        catch
+        {
+            _silpoError = "Unable to add product to cart.";
+        }
+        finally
+        {
+            _cartBusy = false;
+        }
+    }
+
+    private decimal GetQuantity(SilpoProductSummary product)
+    {
+        if (_productQuantities.TryGetValue(product.Id, out var quantity))
+        {
+            return quantity;
+        }
+
+        return GetMinQuantity(product);
+    }
+
+    private string GetQuantityValue(SilpoProductSummary product)
+    {
+        return GetQuantity(product).ToString("0.##", CultureInfo.InvariantCulture);
+    }
+
+    private decimal GetMinQuantity(SilpoProductSummary product)
+    {
+        if (product.Weighted)
+        {
+            return product.AddToBasketStep > 0 ? product.AddToBasketStep : 0.1m;
+        }
+
+        return 1m;
+    }
+
+    private decimal GetStepQuantity(SilpoProductSummary product)
+    {
+        if (product.Weighted)
+        {
+            return product.AddToBasketStep > 0 ? product.AddToBasketStep : 0.1m;
+        }
+
+        return 1m;
+    }
+
+    private void UpdateQuantity(SilpoProductSummary product, string? value)
+    {
+        if (string.IsNullOrWhiteSpace(product.Id))
+        {
+            return;
+        }
+
+        if (!TryParseDecimal(value, out var parsed))
+        {
+            return;
+        }
+
+        _productQuantities[product.Id] = parsed;
+    }
+
+    private static bool TryParseDecimal(string? value, out decimal parsed)
+    {
+        parsed = 0;
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return false;
+        }
+
+        return decimal.TryParse(value, NumberStyles.Any, CultureInfo.CurrentCulture, out parsed)
+               || decimal.TryParse(value, NumberStyles.Any, CultureInfo.InvariantCulture, out parsed);
+    }
+
+    private IReadOnlyList<SilpoCartItem> GetCartItems()
+    {
+        return _cart?.Shipments.SelectMany(shipment => shipment.Products).ToList()
+               ?? new List<SilpoCartItem>();
+    }
+
+    private decimal GetCartTotal()
+    {
+        return GetCartItems().Sum(item => item.Total);
+    }
+
+    private async Task SaveSilpoSessionAsync(string? deliveryType = null, string? cartId = null)
+    {
+        var location = _selectedAddress == null
+            ? _silpoSession?.Location
+            : new SilpoUserLocation
+            {
+                AddressLine = _selectedAddress.Address,
+                City = _selectedAddress.City,
+                Street = _selectedAddress.Street,
+                House = _selectedAddress.HouseNumber,
+                District = _selectedAddress.District,
+                Latitude = _selectedAddress.Latitude,
+                Longitude = _selectedAddress.Longitude
+            };
+
+        _silpoSession = new SilpoSession
+        {
+            Location = location,
+            BranchId = _selectedBranch?.BranchId ?? _silpoSession?.BranchId,
+            DeliveryType = deliveryType ?? _silpoSession?.DeliveryType ?? SilpoApiSettings.DefaultDeliveryType,
+            DeliveryProvider = _silpoSession?.DeliveryProvider ?? SilpoApiSettings.DefaultDeliveryProvider,
+            CartId = cartId ?? _silpoSession?.CartId
+        };
+
+        await SilpoSessionRepository.SaveSessionAsync(_silpoSession);
     }
 
     private sealed class SilpoMappingEdit

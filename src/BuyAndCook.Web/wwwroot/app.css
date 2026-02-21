@@ -296,6 +296,116 @@ p {
     font-size: 14px;
 }
 
+.silpo-api {
+    margin-top: 12px;
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+    gap: 16px;
+}
+
+.silpo-card {
+    background: #fff;
+    border-radius: 14px;
+    border: 1px solid var(--border);
+    padding: 16px;
+    display: grid;
+    gap: 12px;
+}
+
+.silpo-form {
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+
+.silpo-suggestions {
+    display: grid;
+    gap: 8px;
+}
+
+.silpo-suggestion {
+    display: flex;
+    justify-content: space-between;
+    gap: 10px;
+    align-items: center;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 8px 10px;
+    background: #f9fafb;
+}
+
+.silpo-selection {
+    padding: 10px;
+    border-radius: 10px;
+    border: 1px dashed var(--border);
+    background: #faf7f2;
+}
+
+.silpo-product-list {
+    display: grid;
+    gap: 12px;
+    margin-top: 12px;
+}
+
+.silpo-product {
+    display: grid;
+    grid-template-columns: 72px 1fr auto;
+    gap: 12px;
+    align-items: center;
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 12px;
+    background: #fff;
+}
+
+.silpo-product img {
+    width: 72px;
+    height: 72px;
+    object-fit: cover;
+    border-radius: 10px;
+    border: 1px solid var(--border);
+}
+
+.silpo-product-actions {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    align-items: flex-end;
+}
+
+.silpo-qty {
+    width: 90px;
+}
+
+.silpo-cart {
+    display: grid;
+    gap: 8px;
+}
+
+.silpo-cart-items {
+    display: grid;
+    gap: 6px;
+}
+
+.silpo-cart-item {
+    display: flex;
+    justify-content: space-between;
+    gap: 10px;
+    font-size: 14px;
+}
+
+.silpo-cart-total {
+    font-weight: 600;
+}
+
+.error {
+    padding: 10px 12px;
+    border-radius: 10px;
+    background: #ffe8e8;
+    border: 1px solid #f5b5b5;
+    color: #a12626;
+}
+
 @media (max-width: 900px) {
     .hero {
         flex-direction: column;
@@ -318,6 +428,15 @@ p {
 
     .mapping-item {
         grid-template-columns: 1fr;
+    }
+
+    .silpo-product {
+        grid-template-columns: 1fr;
+    }
+
+    .silpo-product-actions {
+        flex-direction: row;
+        align-items: stretch;
     }
 }
 
