@@ -14,7 +14,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <Content Include="../BuyAndCook.Mobile/Resources/Raw/recipes.json" Link="wwwroot/data/recipes.json" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="../BuyAndCook.Mobile/wwwroot/data/recipes.json" Link="wwwroot/data/recipes.json" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
 </Project>

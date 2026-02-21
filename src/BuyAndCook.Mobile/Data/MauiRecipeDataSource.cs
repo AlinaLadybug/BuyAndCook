@@ -5,7 +5,7 @@ namespace BuyAndCook.Data
 {
     public class MauiRecipeDataSource : IRecipeDataSource
     {
-        private const string DataFileName = "recipes.json";
+        private const string DataFileName = "wwwroot/data/recipes.json";
 
         public Task<Stream> OpenStreamAsync()
         {
