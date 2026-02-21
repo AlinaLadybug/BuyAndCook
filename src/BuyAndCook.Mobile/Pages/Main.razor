@@ -1,0 +1,280 @@
+@page "/"
+@using BuyAndCook.Application.Abstractions
+@using BuyAndCook.Application.Services
+@using BuyAndCook.Domain.Models
+@using System.Linq
+@inject IRecipeProvider RecipeProvider
+@inject ShoppingListGenerator ShoppingListGenerator
+@inject IGroceryProviderRegistry GroceryProviderRegistry
+@inject IExternalLinkService ExternalLinkService
+@inject IClipboardService ClipboardService
+@inject IMealPlanRepository MealPlanRepository
+
+<PageTitle>Buy and Cook</PageTitle>
+
+<div class="app">
+    <header class="hero">
+        <div class="hero-copy">
+            <p class="eyebrow">Meal planning • Shopping list • Silpo export</p>
+            <h1>Buy and Cook</h1>
+            <p class="subtitle">Curated Cookpad-inspired recipes for a fast, practical weekly menu.</p>
+        </div>
+        <div class="hero-chip">MVP</div>
+    </header>
+
+    <section class="section">
+        <div class="section-head">
+            <h2>Recipes</h2>
+            <p>@(_recipes == null ? "Loading…" : $"{_recipes.Count} recipes")</p>
+        </div>
+
+        @if (_recipes == null)
+        {
+            <div class="loading">Loading recipes…</div>
+        }
+        else
+        {
+            <div class="grid">
+                @foreach (var recipe in _recipes)
+                {
+                    <article class="card">
+                        @if (!string.IsNullOrWhiteSpace(recipe.ImageUrl))
+                        {
+                            <img class="card-image" src="@recipe.ImageUrl" alt="@recipe.Name" />
+                        }
+                        else
+                        {
+                            <div class="card-image placeholder"></div>
+                        }
+                        <div class="card-body">
+                            <h3>@recipe.Name</h3>
+                            <p class="meta">@recipe.Ingredients.Count ingredients • @recipe.Steps.Count steps</p>
+                            <div class="card-actions">
+                                <button class="btn @GetToggleClass(recipe.Id)" @onclick="() => ToggleRecipeAsync(recipe.Id)">
+                                    @GetToggleLabel(recipe.Id)
+                                </button>
+                                <button class="btn outline" @onclick="() => SelectRecipe(recipe)">Details</button>
+                                <a class="link" href="@recipe.SourceUrl" target="_blank" rel="noopener">Open on Cookpad</a>
+                            </div>
+                        </div>
+                    </article>
+                }
+            </div>
+        }
+    </section>
+
+    @if (_activeRecipe != null)
+    {
+        <section class="section">
+            <div class="section-head">
+                <h2>Recipe Detail</h2>
+                <button class="btn outline" @onclick="ClearRecipe">Close</button>
+            </div>
+            <div class="detail-card">
+                <h3>@_activeRecipe.Name</h3>
+                <div class="detail-grid">
+                    <div>
+                        <h4>Ingredients</h4>
+                        <ul>
+                            @foreach (var ingredient in _activeRecipe.Ingredients)
+                            {
+                                <li>@FormatIngredient(ingredient)</li>
+                            }
+                        </ul>
+                    </div>
+                    <div>
+                        <h4>Steps</h4>
+                        <ol>
+                            @foreach (var step in _activeRecipe.Steps)
+                            {
+                                <li>@step</li>
+                            }
+                        </ol>
+                    </div>
+                </div>
+            </div>
+        </section>
+    }
+
+    <section class="section">
+        <div class="section-head">
+            <h2>Meal Plan</h2>
+            <p>@(_selectedIds.Count == 0 ? "Select recipes to build a menu" : $"{_selectedIds.Count} selected")</p>
+        </div>
+        <div class="plan">
+            @if (_recipes != null && _selectedIds.Count > 0)
+            {
+                <ul>
+                    @foreach (var recipe in _recipes.Where(r => _selectedIds.Contains(r.Id)))
+                    {
+                        <li>@recipe.Name</li>
+                    }
+                </ul>
+            }
+            else
+            {
+                <div class="empty">No recipes selected yet.</div>
+            }
+        </div>
+    </section>
+
+    <section class="section">
+        <div class="section-head">
+            <h2>Shopping List</h2>
+            <button class="btn primary" @onclick="GenerateShoppingList" disabled="@(_selectedIds.Count == 0)">Generate</button>
+        </div>
+        <div class="shopping">
+            @if (_shoppingList.Count == 0)
+            {
+                <div class="empty">Generate a shopping list from your menu.</div>
+            }
+            else
+            {
+                <ul>
+                    @foreach (var item in _shoppingList)
+                    {
+                        <li>@FormatIngredient(item)</li>
+                    }
+                </ul>
+            }
+        </div>
+        <div class="silpo">
+            <div>
+                <h3>Send to Silpo</h3>
+                <p>Export your list to Silpo web catalog for quick item search.</p>
+                @if (!string.IsNullOrWhiteSpace(_silpoQueries))
+                {
+                    <div class="queries">@_silpoQueries</div>
+                }
+            </div>
+            <div class="silpo-actions">
+                <button class="btn outline" @onclick="CopySilpoQueries" disabled="@string.IsNullOrWhiteSpace(_silpoQueries)">Copy list</button>
+                <button class="btn outline" @onclick="OpenSilpo" disabled="@(_shoppingList.Count == 0)">Open Silpo</button>
+            </div>
+        </div>
+    </section>
+</div>
+
+@code {
+    private List<Recipe>? _recipes;
+    private Recipe? _activeRecipe;
+    private readonly HashSet<string> _selectedIds = new();
+    private List<Ingredient> _shoppingList = new();
+    private GroceryExport? _silpoExport;
+    private string _silpoQueries = string.Empty;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var recipes = await RecipeProvider.GetRecipesAsync();
+        _recipes = recipes.ToList();
+        var mealPlan = await MealPlanRepository.GetMealPlanAsync();
+        foreach (var item in mealPlan)
+        {
+            if (!string.IsNullOrWhiteSpace(item.RecipeId))
+            {
+                _selectedIds.Add(item.RecipeId);
+            }
+        }
+    }
+
+    private async Task ToggleRecipeAsync(string id)
+    {
+        if (string.IsNullOrWhiteSpace(id) || _recipes == null)
+        {
+            return;
+        }
+
+        if (_selectedIds.Contains(id))
+        {
+            _selectedIds.Remove(id);
+        }
+        else
+        {
+            _selectedIds.Add(id);
+        }
+
+        await SaveMealPlanAsync();
+    }
+
+    private void GenerateShoppingList()
+    {
+        if (_recipes == null)
+        {
+            return;
+        }
+
+        var selectedRecipes = _recipes.Where(r => _selectedIds.Contains(r.Id)).ToList();
+        _shoppingList = ShoppingListGenerator.GenerateShoppingList(selectedRecipes);
+        UpdateSilpoExport();
+    }
+
+    private static string FormatIngredient(Ingredient ingredient)
+    {
+        if (string.IsNullOrWhiteSpace(ingredient.Unit))
+        {
+            return $"{ingredient.Quantity} {ingredient.Name}".Trim();
+        }
+
+        return $"{ingredient.Quantity} {ingredient.Unit} {ingredient.Name}".Trim();
+    }
+
+    private string GetToggleLabel(string id) => _selectedIds.Contains(id) ? "Remove" : "Add to plan";
+
+    private string GetToggleClass(string id) => _selectedIds.Contains(id) ? "secondary" : "primary";
+
+    private void SelectRecipe(Recipe recipe)
+    {
+        _activeRecipe = recipe;
+    }
+
+    private void ClearRecipe()
+    {
+        _activeRecipe = null;
+    }
+
+    private async Task OpenSilpo()
+    {
+        if (_silpoExport == null)
+        {
+            return;
+        }
+
+        await ExternalLinkService.OpenAsync(_silpoExport.CatalogUrl);
+    }
+
+    private async Task CopySilpoQueries()
+    {
+        if (string.IsNullOrWhiteSpace(_silpoQueries))
+        {
+            return;
+        }
+
+        await ClipboardService.SetTextAsync(_silpoQueries);
+    }
+
+    private void UpdateSilpoExport()
+    {
+        var provider = GroceryProviderRegistry.GetProvider(\"silpo\") ?? GroceryProviderRegistry.GetProviders().FirstOrDefault();
+        _silpoExport = provider?.BuildExport(_shoppingList);
+        _silpoQueries = _silpoExport == null ? string.Empty : string.Join(\"\\n\", _silpoExport.SearchQueries);
+    }
+
+    private Task SaveMealPlanAsync()
+    {
+        if (_recipes == null)
+        {
+            return Task.CompletedTask;
+        }
+
+        var planItems = _recipes
+            .Where(recipe => _selectedIds.Contains(recipe.Id))
+            .Select((recipe, index) => new MealPlanItem
+            {
+                RecipeId = recipe.Id,
+                SortOrder = index
+            })
+            .ToList();
+
+        return MealPlanRepository.SaveMealPlanAsync(planItems);
+    }
+}

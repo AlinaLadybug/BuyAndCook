@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <BlazorDisableThrowNavigationException>true</BlazorDisableThrowNavigationException>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../BuyAndCook.Domain/BuyAndCook.Domain.csproj" />
+    <ProjectReference Include="../BuyAndCook.Application/BuyAndCook.Application.csproj" />
+    <ProjectReference Include="../BuyAndCook.Infrastructure/BuyAndCook.Infrastructure.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Content Include="../BuyAndCook.Mobile/Resources/Raw/recipes.json" Link="wwwroot/data/recipes.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+</Project>
