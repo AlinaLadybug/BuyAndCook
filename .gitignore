@@ -9,3 +9,7 @@
 *.tmp
 **/TestResults/
 .DS_Store
+node_modules/
+playwright-report/
+test-results/
+App_Data/

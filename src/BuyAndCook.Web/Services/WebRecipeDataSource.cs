@@ -18,7 +18,13 @@ namespace BuyAndCook.Web.Services
             var fileInfo = _environment.WebRootFileProvider.GetFileInfo("data/recipes.json");
             if (!fileInfo.Exists)
             {
-                throw new FileNotFoundException("Recipe dataset not found.", fileInfo.PhysicalPath);
+                var fallbackPath = Path.Combine(AppContext.BaseDirectory, "wwwroot", "data", "recipes.json");
+                if (File.Exists(fallbackPath))
+                {
+                    return Task.FromResult<Stream>(File.OpenRead(fallbackPath));
+                }
+
+                throw new FileNotFoundException("Recipe dataset not found.", fallbackPath);
             }
 
             Stream stream = File.OpenRead(fileInfo.PhysicalPath!);

@@ -23,6 +23,11 @@
         <div class="hero-chip">MVP</div>
     </header>
 
+    @if (_isInteractive)
+    {
+        <div data-testid="interactive-ready" style="display: none;"></div>
+    }
+
     <section class="section">
         <div class="section-head">
             <h2>Recipes</h2>
@@ -186,6 +191,7 @@
     private string _silpoQueries = string.Empty;
     private readonly List<SilpoMappingEdit> _silpoMappingEdits = new();
     private bool _silpoMappingsDirty;
+    private bool _isInteractive;
 
     protected override async Task OnInitializedAsync()
     {
@@ -199,6 +205,17 @@
                 _selectedIds.Add(item.RecipeId);
             }
         }
+    }
+
+    protected override Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender && !_isInteractive)
+        {
+            _isInteractive = true;
+            StateHasChanged();
+        }
+
+        return Task.CompletedTask;
     }
 
     private async Task ToggleRecipeAsync(string id)

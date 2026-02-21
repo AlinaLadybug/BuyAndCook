@@ -28,7 +28,7 @@ namespace BuyAndCook.Infrastructure.Services
 
             using var stream = await _dataSource.OpenStreamAsync();
             var data = await JsonSerializer.DeserializeAsync<RecipeData>(stream, _jsonOptions);
-            _cache = data?.Recipes ?? Array.Empty<Recipe>();
+            _cache = data?.Recipes ?? new List<Recipe>();
             return _cache;
         }
     }
