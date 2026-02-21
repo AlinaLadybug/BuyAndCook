@@ -18,6 +18,9 @@ namespace BuyAndCook.Infrastructure.Persistence
             using var connection = _connectionFactory.CreateConnection();
             using var command = connection.CreateCommand();
             command.CommandText = @"
+                DELETE FROM ingredient_mapping
+                WHERE provider_id = $providerId AND ingredient_name = $ingredientName;
+
                 INSERT INTO ingredient_mapping (provider_id, ingredient_name, product_name)
                 VALUES ($providerId, $ingredientName, $productName)";
             command.Parameters.AddWithValue("$providerId", mapping.ProviderId);

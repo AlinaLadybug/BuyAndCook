@@ -241,6 +241,53 @@ p {
     white-space: pre-line;
 }
 
+.silpo-mapping {
+    margin-top: 12px;
+    padding: 16px;
+    border-radius: 14px;
+    background: #fff;
+    border: 1px solid var(--border);
+    display: grid;
+    gap: 12px;
+}
+
+.mapping-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+}
+
+.mapping-head p {
+    margin: 6px 0 0;
+    color: var(--muted);
+    font-size: 13px;
+}
+
+.mapping-list {
+    display: grid;
+    gap: 10px;
+}
+
+.mapping-item {
+    display: grid;
+    grid-template-columns: minmax(120px, 160px) 1fr;
+    gap: 10px;
+    align-items: center;
+}
+
+.mapping-item span {
+    font-weight: 600;
+}
+
+.input {
+    width: 100%;
+    padding: 8px 10px;
+    border-radius: 10px;
+    border: 1px solid var(--border);
+    font-size: 14px;
+}
+
 @media (max-width: 900px) {
     .hero {
         flex-direction: column;
@@ -254,5 +301,14 @@ p {
     .silpo {
         flex-direction: column;
         align-items: flex-start;
+    }
+
+    .mapping-head {
+        flex-direction: column;
+        align-items: flex-start;
+    }
+
+    .mapping-item {
+        grid-template-columns: 1fr;
     }
 }

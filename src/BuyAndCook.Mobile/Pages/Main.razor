@@ -9,6 +9,7 @@
 @inject IExternalLinkService ExternalLinkService
 @inject IClipboardService ClipboardService
 @inject IMealPlanRepository MealPlanRepository
+@inject IIngredientMappingRepository IngredientMappingRepository
 
 <PageTitle>Buy and Cook</PageTitle>
 
@@ -152,6 +153,27 @@
                 <button class="btn outline" @onclick="OpenSilpo" disabled="@(_shoppingList.Count == 0)">Open Silpo</button>
             </div>
         </div>
+        @if (_silpoMappingEdits.Count > 0)
+        {
+            <div class="silpo-mapping">
+                <div class="mapping-head">
+                    <div>
+                        <h3>Silpo search terms</h3>
+                        <p>Adjust search terms and save them for faster repeat orders.</p>
+                    </div>
+                    <button class="btn outline" @onclick="SaveSilpoMappings" disabled="@(!_silpoMappingsDirty)">Save terms</button>
+                </div>
+                <div class="mapping-list">
+                    @foreach (var entry in _silpoMappingEdits)
+                    {
+                        <div class="mapping-item">
+                            <span>@entry.IngredientName</span>
+                            <input class="input" value="@entry.SearchTerm" @oninput="e => UpdateSilpoQuery(entry, e.Value?.ToString())" />
+                        </div>
+                    }
+                </div>
+            </div>
+        }
     </section>
 </div>
 
@@ -162,6 +184,8 @@
     private List<Ingredient> _shoppingList = new();
     private GroceryExport? _silpoExport;
     private string _silpoQueries = string.Empty;
+    private readonly List<SilpoMappingEdit> _silpoMappingEdits = new();
+    private bool _silpoMappingsDirty;
 
     protected override async Task OnInitializedAsync()
     {
@@ -196,7 +220,7 @@
         await SaveMealPlanAsync();
     }
 
-    private void GenerateShoppingList()
+    private async Task GenerateShoppingList()
     {
         if (_recipes == null)
         {
@@ -205,6 +229,7 @@
 
         var selectedRecipes = _recipes.Where(r => _selectedIds.Contains(r.Id)).ToList();
         _shoppingList = ShoppingListGenerator.GenerateShoppingList(selectedRecipes);
+        await LoadSilpoMappingsAsync();
         UpdateSilpoExport();
     }
 
@@ -252,11 +277,130 @@
         await ClipboardService.SetTextAsync(_silpoQueries);
     }
 
+    private void UpdateSilpoQuery(SilpoMappingEdit entry, string? value)
+    {
+        entry.SearchTerm = value ?? string.Empty;
+        _silpoMappingsDirty = true;
+        UpdateSilpoExport();
+    }
+
+    private async Task SaveSilpoMappings()
+    {
+        var provider = GetSilpoProvider();
+        if (provider == null || _silpoMappingEdits.Count == 0)
+        {
+            return;
+        }
+
+        foreach (var entry in _silpoMappingEdits)
+        {
+            var ingredientName = entry.IngredientName.Trim();
+            if (string.IsNullOrWhiteSpace(ingredientName))
+            {
+                continue;
+            }
+
+            var productName = string.IsNullOrWhiteSpace(entry.SearchTerm)
+                ? ingredientName
+                : entry.SearchTerm.Trim();
+
+            entry.SearchTerm = productName;
+
+            await IngredientMappingRepository.SaveMappingAsync(new IngredientMapping
+            {
+                ProviderId = provider.Id,
+                IngredientName = ingredientName,
+                ProductName = productName
+            });
+        }
+
+        _silpoMappingsDirty = false;
+        UpdateSilpoExport();
+    }
+
+    private async Task LoadSilpoMappingsAsync()
+    {
+        _silpoMappingEdits.Clear();
+        _silpoMappingsDirty = false;
+
+        var provider = GetSilpoProvider();
+        if (provider == null || _shoppingList.Count == 0)
+        {
+            return;
+        }
+
+        var mappingLookup = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        var mappings = await IngredientMappingRepository.GetMappingsAsync(provider.Id);
+        foreach (var mapping in mappings)
+        {
+            if (string.IsNullOrWhiteSpace(mapping.IngredientName))
+            {
+                continue;
+            }
+
+            var ingredientName = mapping.IngredientName.Trim();
+            if (string.IsNullOrWhiteSpace(ingredientName))
+            {
+                continue;
+            }
+
+            var productName = string.IsNullOrWhiteSpace(mapping.ProductName)
+                ? ingredientName
+                : mapping.ProductName.Trim();
+
+            mappingLookup[ingredientName] = productName;
+        }
+
+        var ingredientNames = _shoppingList
+            .Select(item => item.Name?.Trim())
+            .Where(name => !string.IsNullOrWhiteSpace(name))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(name => name, StringComparer.OrdinalIgnoreCase);
+
+        foreach (var name in ingredientNames)
+        {
+            var normalized = name ?? string.Empty;
+            var searchTerm = mappingLookup.TryGetValue(normalized, out var mapped)
+                ? mapped
+                : normalized;
+
+            _silpoMappingEdits.Add(new SilpoMappingEdit
+            {
+                IngredientName = normalized,
+                SearchTerm = searchTerm
+            });
+        }
+    }
+
     private void UpdateSilpoExport()
     {
-        var provider = GroceryProviderRegistry.GetProvider(\"silpo\") ?? GroceryProviderRegistry.GetProviders().FirstOrDefault();
-        _silpoExport = provider?.BuildExport(_shoppingList);
-        _silpoQueries = _silpoExport == null ? string.Empty : string.Join(\"\\n\", _silpoExport.SearchQueries);
+        var provider = GetSilpoProvider();
+        if (provider == null || _shoppingList.Count == 0)
+        {
+            _silpoExport = null;
+            _silpoQueries = string.Empty;
+            return;
+        }
+
+        var queryIngredients = _silpoMappingEdits.Count == 0
+            ? _shoppingList
+            : _silpoMappingEdits
+                .Where(entry => !string.IsNullOrWhiteSpace(entry.SearchTerm))
+                .Select(entry => new Ingredient(entry.SearchTerm.Trim(), 1, string.Empty));
+
+        _silpoExport = provider.BuildExport(queryIngredients);
+        _silpoQueries = _silpoExport == null ? string.Empty : string.Join("\n", _silpoExport.SearchQueries);
+    }
+
+    private IGroceryProvider? GetSilpoProvider()
+    {
+        return GroceryProviderRegistry.GetProvider("silpo") ?? GroceryProviderRegistry.GetProviders().FirstOrDefault();
+    }
+
+    private sealed class SilpoMappingEdit
+    {
+        public string IngredientName { get; set; } = string.Empty;
+        public string SearchTerm { get; set; } = string.Empty;
     }
 
     private Task SaveMealPlanAsync()
