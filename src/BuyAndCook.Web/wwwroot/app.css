@@ -398,6 +398,18 @@ p {
     font-weight: 600;
 }
 
+.silpo-share {
+    display: grid;
+    gap: 8px;
+    margin-top: 8px;
+}
+
+.silpo-share-actions {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
 .error {
     padding: 10px 12px;
     border-radius: 10px;

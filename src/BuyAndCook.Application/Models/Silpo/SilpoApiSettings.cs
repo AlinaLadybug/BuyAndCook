@@ -9,5 +9,6 @@ namespace BuyAndCook.Application.Models.Silpo
         public string DefaultDeliveryType { get; set; } = "DeliveryHome";
         public string DefaultDeliveryProvider { get; set; } = "CityRider";
         public string? WideAssortBranchId { get; set; } = "1f05d7b8-27b0-6762-8aea-896c4e98f56d";
+        public string BasketUrl { get; set; } = "https://silpo.ua/basket";
     }
 }

@@ -18,6 +18,11 @@ Mobile uses the same defaults from `SilpoApiSettings`.
 3. Create a cart for the selected branch.
 4. Search products and add them to the cart.
 5. Refresh the cart to confirm contents.
+6. Use the “Cart link” buttons to open/copy the shareable cart view.
+
+## Cart links
+- Internal cart viewer: `/silpo/cart/{cartId}` (Web) for sharing a read-only cart view.
+- Silpo basket: `https://silpo.ua/basket` (opens Silpo’s cart page).
 
 ## Manual QA Checklist
 - Address search returns suggestions.

@@ -17,6 +17,7 @@
 @inject ISilpoCartService SilpoCartService
 @inject ISilpoSessionRepository SilpoSessionRepository
 @inject SilpoApiSettings SilpoApiSettings
+@inject NavigationManager NavigationManager
 
 <PageTitle>Buy and Cook</PageTitle>
 
@@ -265,6 +266,23 @@
                             }
                         </div>
                         <div class="silpo-cart-total">Total: @GetCartTotal().ToString("0.##", CultureInfo.InvariantCulture)</div>
+                    </div>
+                    <div class="silpo-share">
+                        <div class="meta">Cart link:</div>
+                        @if (!string.IsNullOrWhiteSpace(GetCartShareUrl()))
+                        {
+                            <a class="link" href="@GetCartShareUrl()" target="_blank" rel="noopener">@GetCartShareUrl()</a>
+                        }
+                        <div class="silpo-share-actions">
+                            <button class="btn outline" @onclick="OpenCartShareLinkAsync">Open</button>
+                            <button class="btn outline" @onclick="CopyCartShareLinkAsync">Copy</button>
+                        </div>
+                        <div class="meta">Silpo basket:</div>
+                        <a class="link" href="@SilpoApiSettings.BasketUrl" target="_blank" rel="noopener">@SilpoApiSettings.BasketUrl</a>
+                        <div class="silpo-share-actions">
+                            <button class="btn outline" @onclick="OpenSilpoBasketAsync">Open</button>
+                            <button class="btn outline" @onclick="CopySilpoBasketAsync">Copy</button>
+                        </div>
                     </div>
                 }
                 else
@@ -955,6 +973,59 @@
         };
 
         await SilpoSessionRepository.SaveSessionAsync(_silpoSession);
+    }
+
+    private string? GetCartShareUrl()
+    {
+        if (_cart == null || string.IsNullOrWhiteSpace(_cart.Id))
+        {
+            return null;
+        }
+
+        var baseUri = NavigationManager.BaseUri.TrimEnd('/');
+        return $"{baseUri}/silpo/cart/{_cart.Id}";
+    }
+
+    private async Task OpenCartShareLinkAsync()
+    {
+        var url = GetCartShareUrl();
+        if (string.IsNullOrWhiteSpace(url))
+        {
+            return;
+        }
+
+        await ExternalLinkService.OpenAsync(url);
+    }
+
+    private async Task CopyCartShareLinkAsync()
+    {
+        var url = GetCartShareUrl();
+        if (string.IsNullOrWhiteSpace(url))
+        {
+            return;
+        }
+
+        await ClipboardService.SetTextAsync(url);
+    }
+
+    private async Task OpenSilpoBasketAsync()
+    {
+        if (string.IsNullOrWhiteSpace(SilpoApiSettings.BasketUrl))
+        {
+            return;
+        }
+
+        await ExternalLinkService.OpenAsync(SilpoApiSettings.BasketUrl);
+    }
+
+    private async Task CopySilpoBasketAsync()
+    {
+        if (string.IsNullOrWhiteSpace(SilpoApiSettings.BasketUrl))
+        {
+            return;
+        }
+
+        await ClipboardService.SetTextAsync(SilpoApiSettings.BasketUrl);
     }
 
     private sealed class SilpoMappingEdit

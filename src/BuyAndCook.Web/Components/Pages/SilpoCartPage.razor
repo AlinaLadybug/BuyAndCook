@@ -1,0 +1,103 @@
+@page "/silpo/cart/{CartId}"
+@using BuyAndCook.Application.Abstractions
+@using BuyAndCook.Application.Models.Silpo
+@using System.Globalization
+@inject ISilpoCartService SilpoCartService
+
+<PageTitle>Silpo Cart</PageTitle>
+
+<div class="app">
+    <header class="hero">
+        <div class="hero-copy">
+            <p class="eyebrow">Silpo cart viewer</p>
+            <h1>Silpo Cart</h1>
+            <p class="subtitle">Review the products added to your Silpo cart.</p>
+        </div>
+        <div class="hero-chip">Cart</div>
+    </header>
+
+    <section class="section">
+        <div class="section-head">
+            <h2>Cart details</h2>
+            <p>@(string.IsNullOrWhiteSpace(CartId) ? "No cart id" : $"Cart ID: {CartId}")</p>
+        </div>
+
+        @if (_loading)
+        {
+            <div class="loading">Loading cart…</div>
+        }
+        else if (!string.IsNullOrWhiteSpace(_error))
+        {
+            <div class="error">@_error</div>
+        }
+        else if (_cart == null)
+        {
+            <div class="empty">Cart not found.</div>
+        }
+        else
+        {
+            <div class="silpo-cart">
+                <div class="silpo-cart-items">
+                    @foreach (var item in GetCartItems())
+                    {
+                        <div class="silpo-cart-item">
+                            <span>@item.Data.Title</span>
+                            <span>@item.Quantity.ToString("0.##", CultureInfo.InvariantCulture) × @item.Price.ToString("0.##", CultureInfo.InvariantCulture)</span>
+                        </div>
+                    }
+                </div>
+                <div class="silpo-cart-total">Total: @GetCartTotal().ToString("0.##", CultureInfo.InvariantCulture)</div>
+            </div>
+        }
+    </section>
+</div>
+
+@code {
+    [Parameter]
+    public string? CartId { get; set; }
+
+    private SilpoCart? _cart;
+    private bool _loading;
+    private string _error = string.Empty;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (string.IsNullOrWhiteSpace(CartId))
+        {
+            _error = "Cart id is missing.";
+            _cart = null;
+            return;
+        }
+
+        _loading = true;
+        _error = string.Empty;
+
+        try
+        {
+            _cart = await SilpoCartService.GetCartAsync(CartId);
+            if (_cart == null)
+            {
+                _error = "Cart not found or expired.";
+            }
+        }
+        catch
+        {
+            _error = "Unable to load cart.";
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private IReadOnlyList<SilpoCartItem> GetCartItems()
+    {
+        return _cart?.Shipments.SelectMany(shipment => shipment.Products).ToList()
+               ?? new List<SilpoCartItem>();
+    }
+
+    private decimal GetCartTotal()
+    {
+        return GetCartItems().Sum(item => item.Total);
+    }
+}
