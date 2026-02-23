@@ -13,7 +13,7 @@ test('shows Silpo API tooling', async ({ page }) => {
   await expect(searchButtons.nth(0)).toBeDisabled();
   await expect(searchButtons.nth(1)).toBeDisabled();
 
-  await expect(page.getByRole('heading', { name: 'Cart' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Cart', exact: true })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Create cart' })).toBeDisabled();
   await expect(page.getByRole('button', { name: 'Refresh' })).toBeDisabled();
   await expect(page.getByRole('button', { name: 'Clear' })).toBeDisabled();

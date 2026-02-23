@@ -160,6 +160,34 @@
                 <button class="btn outline" @onclick="OpenSilpo" disabled="@(_shoppingList.Count == 0)">Open Silpo</button>
             </div>
         </div>
+        <div class="silpo-card">
+            <h3>Silpo cart link</h3>
+            <p class="meta">Build a Silpo cart from your shopping list.</p>
+            @if (!string.IsNullOrWhiteSpace(_cartLinkError))
+            {
+                <div class="error">@_cartLinkError</div>
+            }
+            @if (!string.IsNullOrWhiteSpace(_cartLinkStatus))
+            {
+                <div class="meta">@_cartLinkStatus</div>
+            }
+            @if (!string.IsNullOrWhiteSpace(_cartLinkStatus) && HasCart && _cart != null)
+            {
+                <div class="meta">Cart ID: @_cart.Id</div>
+                @if (!string.IsNullOrWhiteSpace(SilpoApiSettings.BasketUrl))
+                {
+                    <div class="meta">Silpo basket:</div>
+                    <div class="meta">@SilpoApiSettings.BasketUrl</div>
+                    <div class="silpo-actions">
+                        <button class="btn outline" @onclick="OpenSilpoBasketAsync">Open</button>
+                        <button class="btn outline" @onclick="CopySilpoBasketAsync">Copy</button>
+                    </div>
+                }
+            }
+            <div class="silpo-actions">
+                <button class="btn primary" @onclick="CreateSilpoCartLinkAsync" disabled="@(_cartLinkBusy || _shoppingList.Count == 0)">Create Silpo cart link</button>
+            </div>
+        </div>
         @if (_silpoMappingEdits.Count > 0)
         {
             <div class="silpo-mapping">
@@ -337,6 +365,10 @@
     private bool _locationBusy;
     private bool _searchBusy;
     private bool _cartBusy;
+    private bool _cartLinkBusy;
+    private readonly List<string> _cartLinkSkipped = new();
+    private string _cartLinkError = string.Empty;
+    private string _cartLinkStatus = string.Empty;
     private string _silpoError = string.Empty;
 
     protected override async Task OnInitializedAsync()
@@ -383,6 +415,9 @@
 
         var selectedRecipes = _recipes.Where(r => _selectedIds.Contains(r.Id)).ToList();
         _shoppingList = ShoppingListGenerator.GenerateShoppingList(selectedRecipes);
+        _cartLinkStatus = string.Empty;
+        _cartLinkError = string.Empty;
+        _cartLinkSkipped.Clear();
         await LoadSilpoMappingsAsync();
         UpdateSilpoExport();
     }
@@ -743,6 +778,216 @@
         }
     }
 
+    private async Task CreateSilpoCartLinkAsync()
+    {
+        _cartLinkError = string.Empty;
+        _cartLinkStatus = string.Empty;
+
+        if (_shoppingList.Count == 0)
+        {
+            _cartLinkError = "Generate a shopping list first.";
+            return;
+        }
+
+        if (_selectedAddress == null || _selectedBranch == null)
+        {
+            _cartLinkError = "Select a location before building a cart.";
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(_selectedAddress.HouseNumber))
+        {
+            _cartLinkError = "Address must include a house number.";
+            return;
+        }
+
+        var searchTerms = BuildCartSearchTerms();
+        if (searchTerms.Count == 0)
+        {
+            _cartLinkError = "Shopping list has no items to search.";
+            return;
+        }
+
+        _cartLinkBusy = true;
+        _cartLinkStatus = "Creating cart and adding items...";
+        _cartLinkSkipped.Clear();
+
+        try
+        {
+            var deliveryType = _silpoSession?.DeliveryType ?? SilpoApiSettings.DefaultDeliveryType;
+            var deliveryProvider = _silpoSession?.DeliveryProvider ?? SilpoApiSettings.DefaultDeliveryProvider;
+
+            var draft = new SilpoCartDraft
+            {
+                Address = new SilpoCartAddress
+                {
+                    City = _selectedAddress.City,
+                    Street = _selectedAddress.Street,
+                    House = _selectedAddress.HouseNumber,
+                    District = _selectedAddress.District,
+                    Latitude = _selectedAddress.Latitude,
+                    Longitude = _selectedAddress.Longitude,
+                    BranchIdWideassort = SilpoApiSettings.WideAssortBranchId,
+                    DeliveryProvider = deliveryProvider
+                },
+                DeliveryType = deliveryType,
+                DeliveryProvider = deliveryProvider,
+                Shipments = new List<SilpoCartShipment>
+                {
+                    new SilpoCartShipment
+                    {
+                        BranchId = _selectedBranch.BranchId,
+                        CompanyId = string.IsNullOrWhiteSpace(_selectedBranch.CompanyId)
+                            ? SilpoApiSettings.CompanyId
+                            : _selectedBranch.CompanyId
+                    }
+                }
+            };
+
+            var cartId = await SilpoCartService.CreateCartAsync(draft);
+            await SaveSilpoSessionAsync(deliveryType, cartId);
+
+            var added = 0;
+            foreach (var term in searchTerms)
+            {
+                if (string.IsNullOrWhiteSpace(term.SearchTerm))
+                {
+                    continue;
+                }
+
+                SilpoProductSummary? product = null;
+                try
+                {
+                    var result = await SilpoProductSearchService.QuickSearchAsync(
+                        _selectedBranch.BranchId,
+                        term.SearchTerm,
+                        1,
+                        0,
+                        "productsList",
+                        "asc");
+
+                    product = result.Items.FirstOrDefault();
+                }
+                catch
+                {
+                    _cartLinkSkipped.Add(term.IngredientName);
+                    continue;
+                }
+
+                if (product == null)
+                {
+                    _cartLinkSkipped.Add(term.IngredientName);
+                    continue;
+                }
+
+                var quantity = product.Weighted
+                    ? product.AddToBasketStep > 0 ? product.AddToBasketStep : 0.1m
+                    : 1m;
+
+                var request = new SilpoCartProductRequest
+                {
+                    ProductId = product.Id,
+                    Quantity = quantity,
+                    BranchId = string.IsNullOrWhiteSpace(product.BranchId)
+                        ? _selectedBranch.BranchId
+                        : product.BranchId,
+                    CompanyId = string.IsNullOrWhiteSpace(product.CompanyId)
+                        ? SilpoApiSettings.CompanyId
+                        : product.CompanyId
+                };
+
+                try
+                {
+                    await SilpoCartService.AddProductsAsync(cartId, new[] { request });
+                    added++;
+                }
+                catch
+                {
+                    _cartLinkSkipped.Add(term.IngredientName);
+                }
+            }
+
+            _cart = await SilpoCartService.GetCartAsync(cartId);
+            _cartLinkStatus = BuildCartLinkStatus(added, _cartLinkSkipped);
+        }
+        catch
+        {
+            _cartLinkError = "Unable to build Silpo cart.";
+        }
+        finally
+        {
+            _cartLinkBusy = false;
+        }
+    }
+
+    private IReadOnlyList<SilpoCartSearchTerm> BuildCartSearchTerms()
+    {
+        var results = new List<SilpoCartSearchTerm>();
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        if (_silpoMappingEdits.Count > 0)
+        {
+            foreach (var entry in _silpoMappingEdits)
+            {
+                if (string.IsNullOrWhiteSpace(entry.SearchTerm))
+                {
+                    continue;
+                }
+
+                var term = entry.SearchTerm.Trim();
+                if (!seen.Add(term))
+                {
+                    continue;
+                }
+
+                var ingredientName = string.IsNullOrWhiteSpace(entry.IngredientName)
+                    ? term
+                    : entry.IngredientName.Trim();
+
+                results.Add(new SilpoCartSearchTerm(ingredientName, term));
+            }
+        }
+        else
+        {
+            foreach (var item in _shoppingList)
+            {
+                if (string.IsNullOrWhiteSpace(item.Name))
+                {
+                    continue;
+                }
+
+                var term = item.Name.Trim();
+                if (!seen.Add(term))
+                {
+                    continue;
+                }
+
+                results.Add(new SilpoCartSearchTerm(term, term));
+            }
+        }
+
+        return results;
+    }
+
+    private static string BuildCartLinkStatus(int added, IReadOnlyCollection<string> skipped)
+    {
+        var addedLabel = added == 1 ? "1 item" : $"{added} items";
+        var status = $"Added {addedLabel} to Silpo cart.";
+
+        if (skipped.Count == 0)
+        {
+            return status;
+        }
+
+        var preview = string.Join(", ", skipped.Take(3));
+        if (skipped.Count > 3)
+        {
+            preview = $"{preview}...";
+        }
+
+        return $"{status} Skipped {skipped.Count}: {preview}.";
+    }
+
     private async Task RefreshCartAsync()
     {
         if (!HasCart)
@@ -771,6 +1016,9 @@
         };
 
         await SilpoSessionRepository.SaveSessionAsync(_silpoSession);
+        _cartLinkStatus = string.Empty;
+        _cartLinkError = string.Empty;
+        _cartLinkSkipped.Clear();
     }
 
     private async Task SearchProductsAsync()
@@ -967,6 +1215,8 @@
 
         await ClipboardService.SetTextAsync(SilpoApiSettings.BasketUrl);
     }
+
+    private sealed record SilpoCartSearchTerm(string IngredientName, string SearchTerm);
 
     private sealed class SilpoMappingEdit
     {

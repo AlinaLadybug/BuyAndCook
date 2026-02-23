@@ -21,6 +21,12 @@ Mobile uses the same defaults from `SilpoApiSettings`.
 5. Refresh the cart to confirm contents.
 6. Use the “Cart link” buttons to open/copy the shareable cart view (Web only).
 
+## Recipe cart link flow
+1. Select recipes and generate a shopping list.
+2. Click “Create Silpo cart link”.
+3. If location is missing, select an address first.
+4. Use the Silpo basket link to continue checkout.
+
 ## Cart links
 - Internal cart viewer: `/silpo/cart/{cartId}` (Web) for sharing a read-only cart view.
 - Silpo basket: `https://silpo.ua/basket` (opens Silpo’s cart page).
@@ -33,3 +39,4 @@ Mobile uses the same defaults from `SilpoApiSettings`.
 - Add-to-cart updates the cart and totals.
 - Refresh cart pulls the latest cart state.
 - Clear cart removes stored cart ID but keeps location.
+- “Create Silpo cart link” builds a cart from the shopping list (or shows a location warning).
