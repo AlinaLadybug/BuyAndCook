@@ -9,6 +9,7 @@ Web settings live in `src/BuyAndCook.Web/appsettings.json` under `SilpoApi`:
 - `DefaultDeliveryType`: defaults to `DeliveryHome`
 - `DefaultDeliveryProvider`: defaults to `CityRider`
 - `WideAssortBranchId`: optional wide assortment branch
+- `BasketUrl`: Silpo basket URL
 
 Mobile uses the same defaults from `SilpoApiSettings`.
 
@@ -18,7 +19,7 @@ Mobile uses the same defaults from `SilpoApiSettings`.
 3. Create a cart for the selected branch.
 4. Search products and add them to the cart.
 5. Refresh the cart to confirm contents.
-6. Use the “Cart link” buttons to open/copy the shareable cart view.
+6. Use the “Cart link” buttons to open/copy the shareable cart view (Web only).
 
 ## Cart links
 - Internal cart viewer: `/silpo/cart/{cartId}` (Web) for sharing a read-only cart view.
