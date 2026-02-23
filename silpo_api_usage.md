@@ -31,6 +31,10 @@ Mobile uses the same defaults from `SilpoApiSettings`.
 - Internal cart viewer: `/silpo/cart/{cartId}` (Web) for sharing a read-only cart view.
 - Silpo basket: `https://silpo.ua/basket` (opens Silpo’s cart page).
 
+## Testing
+- Playwright runs the web app with `SilpoApi:UseStub=true` by default (see `playwright.config.js`).
+- Override with `SILPO_API_STUB=false` if you want to hit real Silpo endpoints.
+
 ## Manual QA Checklist
 - Address search returns suggestions.
 - Selecting a suggestion resolves a branch and persists session.

@@ -30,11 +30,22 @@ builder.Services.AddSingleton<IGroceryProviderRegistry, GroceryProviderRegistry>
 
 var silpoSettings = builder.Configuration.GetSection("SilpoApi").Get<SilpoApiSettings>() ?? new SilpoApiSettings();
 builder.Services.AddSingleton(silpoSettings);
-builder.Services.AddSingleton(new HttpClient());
-builder.Services.AddSingleton<SilpoApiClient>();
-builder.Services.AddSingleton<ISilpoLocationService>(sp => sp.GetRequiredService<SilpoApiClient>());
-builder.Services.AddSingleton<ISilpoProductSearchService>(sp => sp.GetRequiredService<SilpoApiClient>());
-builder.Services.AddSingleton<ISilpoCartService>(sp => sp.GetRequiredService<SilpoApiClient>());
+var useStubSilpo = builder.Configuration.GetValue<bool>("SilpoApi:UseStub");
+if (useStubSilpo)
+{
+    builder.Services.AddSingleton<StubSilpoApiClient>();
+    builder.Services.AddSingleton<ISilpoLocationService>(sp => sp.GetRequiredService<StubSilpoApiClient>());
+    builder.Services.AddSingleton<ISilpoProductSearchService>(sp => sp.GetRequiredService<StubSilpoApiClient>());
+    builder.Services.AddSingleton<ISilpoCartService>(sp => sp.GetRequiredService<StubSilpoApiClient>());
+}
+else
+{
+    builder.Services.AddSingleton(new HttpClient());
+    builder.Services.AddSingleton<SilpoApiClient>();
+    builder.Services.AddSingleton<ISilpoLocationService>(sp => sp.GetRequiredService<SilpoApiClient>());
+    builder.Services.AddSingleton<ISilpoProductSearchService>(sp => sp.GetRequiredService<SilpoApiClient>());
+    builder.Services.AddSingleton<ISilpoCartService>(sp => sp.GetRequiredService<SilpoApiClient>());
+}
 
 var app = builder.Build();
 

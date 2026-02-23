@@ -17,9 +17,27 @@ test('creates a Silpo cart link from the shopping list', async ({ page }) => {
   const cartLinkHeading = page.getByRole('heading', { name: 'Silpo cart link' });
   await expect(cartLinkHeading).toBeVisible();
 
+  const addressInput = page.getByPlaceholder('Enter address (city, street, house)');
+  await addressInput.fill('Kyiv, Test Street 10');
+  await addressInput.blur();
+
+  const locationSearchButton = addressInput.locator('..').getByRole('button', { name: 'Search' });
+  await expect(locationSearchButton).toBeEnabled();
+  await locationSearchButton.click();
+
+  const useButton = page.getByRole('button', { name: 'Use' }).first();
+  await useButton.click();
+
+  await expect(page.getByText('Nearest branch:')).toBeVisible();
+
   const buildButton = page.getByRole('button', { name: 'Create Silpo cart link' });
   await expect(buildButton).toBeEnabled();
   await buildButton.click();
 
-  await expect(page.getByText('Select a location before building a cart.')).toBeVisible();
+  const cartCard = cartLinkHeading.locator('..');
+  await expect(cartCard.getByText('Added')).toBeVisible();
+
+  const cartLink = cartCard.locator('a.link').filter({ hasText: '/silpo/cart/' });
+  await expect(cartLink).toBeVisible();
+  await expect(cartLink).toHaveAttribute('href', /\/silpo\/cart\//);
 });
