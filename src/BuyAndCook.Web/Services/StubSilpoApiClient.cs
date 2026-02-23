@@ -209,6 +209,21 @@ namespace BuyAndCook.Web.Services
             }
         }
 
+        public Task<IReadOnlyList<SilpoDeliveryTimeSlot>> GetDeliveryTimeSlotsAsync(
+            string branchId,
+            IReadOnlyList<string> deliveryTypes,
+            CancellationToken cancellationToken = default)
+        {
+            var slot = new SilpoDeliveryTimeSlot
+            {
+                Start = DateTime.UtcNow.AddHours(2).ToString("yyyy-MM-ddTHH:mm:ssZ"),
+                End = DateTime.UtcNow.AddHours(3).ToString("yyyy-MM-ddTHH:mm:ssZ"),
+                DeliveryType = deliveryTypes.FirstOrDefault() ?? _settings.DefaultDeliveryType
+            };
+
+            return Task.FromResult<IReadOnlyList<SilpoDeliveryTimeSlot>>(new List<SilpoDeliveryTimeSlot> { slot });
+        }
+
         public Task UpdateCartAsync(string cartId, SilpoCartUpdate update, CancellationToken cancellationToken = default)
         {
             if (string.IsNullOrWhiteSpace(cartId))

@@ -16,6 +16,11 @@ namespace BuyAndCook.Application.Abstractions
 
         Task<SilpoCart?> GetCartAsync(string cartId, CancellationToken cancellationToken = default);
 
+        Task<IReadOnlyList<SilpoDeliveryTimeSlot>> GetDeliveryTimeSlotsAsync(
+            string branchId,
+            IReadOnlyList<string> deliveryTypes,
+            CancellationToken cancellationToken = default);
+
         Task UpdateCartAsync(
             string cartId,
             SilpoCartUpdate update,

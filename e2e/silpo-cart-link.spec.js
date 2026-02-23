@@ -1,6 +1,9 @@
 const { test, expect } = require('@playwright/test');
 
+const useStub = process.env.SILPO_API_STUB === 'true';
+
 test('creates a Silpo cart link from the shopping list', async ({ page }) => {
+  test.skip(useStub, 'Requires real Silpo API.');
   await page.goto('/');
   await page.waitForSelector('[data-testid="interactive-ready"]', { state: 'attached' });
 
@@ -17,25 +20,42 @@ test('creates a Silpo cart link from the shopping list', async ({ page }) => {
   const cartLinkHeading = page.getByRole('heading', { name: 'Silpo cart link' });
   await expect(cartLinkHeading).toBeVisible();
 
-  const addressInput = page.getByPlaceholder('Enter address (city, street, house)');
-  await addressInput.fill('Kyiv, Test Street 10');
-  await addressInput.blur();
+  test.setTimeout(120000);
 
-  const locationSearchButton = addressInput.locator('..').getByRole('button', { name: 'Search' });
-  await expect(locationSearchButton).toBeEnabled();
-  await locationSearchButton.click();
+  const createCartButton = page.getByRole('button', { name: 'Create cart' });
+  const hasSavedLocation = await createCartButton.isEnabled();
 
-  const useButton = page.getByRole('button', { name: 'Use' }).first();
-  await useButton.click();
+  if (!hasSavedLocation) {
+    const addressInput = page.getByPlaceholder('Enter address (city, street, house)');
+    const testAddress = process.env.SILPO_E2E_ADDRESS || 'Kyiv, Khreshchatyk 10';
+    expect(testAddress).toMatch(/\d/);
+    await addressInput.fill(testAddress);
+    await addressInput.blur();
 
-  await expect(page.getByText('Nearest branch:')).toBeVisible();
+    const locationSearchButton = addressInput.locator('..').getByRole('button', { name: 'Search' });
+    await expect(locationSearchButton).toBeEnabled();
+    await locationSearchButton.click();
+
+    const suggestions = page.locator('.silpo-suggestion');
+    await expect(suggestions.first()).toBeVisible({ timeout: 20000 });
+    const suggestionsWithHouse = suggestions.filter({ hasText: /\d/ });
+    const suggestionCount = await suggestionsWithHouse.count();
+    const targetSuggestion = suggestionCount > 0 ? suggestionsWithHouse.first() : suggestions.first();
+    const useButton = targetSuggestion.getByRole('button', { name: 'Use' });
+    await useButton.click();
+
+    await expect(page.getByText('Nearest branch:')).toBeVisible({ timeout: 20000 });
+  } else {
+    await expect(page.getByText('Loaded saved location.')).toBeVisible();
+  }
 
   const buildButton = page.getByRole('button', { name: 'Create Silpo cart link' });
   await expect(buildButton).toBeEnabled();
   await buildButton.click();
 
   const cartCard = cartLinkHeading.locator('..');
-  await expect(cartCard.getByText('Added')).toBeVisible();
+  await expect(cartCard.getByText(/Added|Unable to build Silpo cart\./)).toBeVisible({ timeout: 60000 });
+  await expect(cartCard.getByText('Unable to build Silpo cart.')).toHaveCount(0);
 
   const cartLink = cartCard.locator('a.link').filter({ hasText: '/silpo/cart/' });
   await expect(cartLink).toBeVisible();

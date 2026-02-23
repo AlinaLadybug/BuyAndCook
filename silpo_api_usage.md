@@ -32,8 +32,12 @@ Mobile uses the same defaults from `SilpoApiSettings`.
 - Silpo basket: `https://silpo.ua/basket` (opens Silpo’s cart page).
 
 ## Testing
-- Playwright runs the web app with `SilpoApi:UseStub=true` by default (see `playwright.config.js`).
-- Override with `SILPO_API_STUB=false` if you want to hit real Silpo endpoints.
+- Playwright runs against the real Silpo endpoints by default.
+- Set `SILPO_API_STUB=true` to use the local stub (deterministic tests).
+- Optional: `SILPO_E2E_ADDRESS="Kyiv, Khreshchatyk 10"` to override the live test address.
+- Ensure the address includes a house number; the E2E flow selects the first suggestion containing digits.
+- E2E uses an isolated SQLite file under the OS temp directory by default (see `BUYANDCOOK_DB_PATH` in `playwright.config.js`).
+- Set `PLAYWRIGHT_DB_ISOLATED=false` or `PLAYWRIGHT_REUSE_SERVER=true` if you want to reuse a running web server.
 
 ## Manual QA Checklist
 - Address search returns suggestions.

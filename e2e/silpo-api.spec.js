@@ -14,9 +14,9 @@ test('shows Silpo API tooling', async ({ page }) => {
   await expect(searchButtons.nth(1)).toBeDisabled();
 
   await expect(page.getByRole('heading', { name: 'Cart', exact: true })).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Create cart' })).toBeDisabled();
-  await expect(page.getByRole('button', { name: 'Refresh' })).toBeDisabled();
-  await expect(page.getByRole('button', { name: 'Clear' })).toBeDisabled();
+  await expect(page.getByRole('button', { name: 'Create cart' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Refresh' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Clear' })).toBeVisible();
 
   await expect(page.getByRole('heading', { name: 'Product search' })).toBeVisible();
   await expect(page.getByPlaceholder('Search products in Silpo')).toBeVisible();

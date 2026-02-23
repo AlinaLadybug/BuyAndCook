@@ -349,6 +349,71 @@ namespace BuyAndCook.Infrastructure.Integrations
             };
         }
 
+        public async Task<IReadOnlyList<SilpoDeliveryTimeSlot>> GetDeliveryTimeSlotsAsync(
+            string branchId,
+            IReadOnlyList<string> deliveryTypes,
+            CancellationToken cancellationToken = default)
+        {
+            if (string.IsNullOrWhiteSpace(branchId))
+            {
+                return new List<SilpoDeliveryTimeSlot>();
+            }
+
+            var types = deliveryTypes.Count == 0
+                ? new List<string> { _settings.DefaultDeliveryType }
+                : deliveryTypes.Where(type => !string.IsNullOrWhiteSpace(type)).ToList();
+
+            var query = string.Join("&", types.Select(type => $"deliveryTypes[]={Uri.EscapeDataString(type)}"));
+            var url = $"{_settings.EcomBaseUrl.TrimEnd('/')}/v3/delivery/branches/{branchId}/time-slots?{query}";
+
+            using var response = await _httpClient.GetAsync(url, cancellationToken);
+            await EnsureSuccessAsync(response);
+
+            await using var stream = await response.Content.ReadAsStreamAsync();
+            using var document = await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken);
+            if (!document.RootElement.TryGetProperty("items", out var items) || items.ValueKind != JsonValueKind.Array)
+            {
+                return new List<SilpoDeliveryTimeSlot>();
+            }
+
+            var slots = new List<(SilpoDeliveryTimeSlot Slot, bool Available)>();
+            foreach (var item in items.EnumerateArray())
+            {
+                if (!item.TryGetProperty("datePeriod", out var datePeriod))
+                {
+                    continue;
+                }
+
+                var start = datePeriod.TryGetProperty("start", out var startValue) ? startValue.GetString() : null;
+                var end = datePeriod.TryGetProperty("end", out var endValue) ? endValue.GetString() : null;
+                if (string.IsNullOrWhiteSpace(start) || string.IsNullOrWhiteSpace(end))
+                {
+                    continue;
+                }
+
+                var available = item.TryGetProperty("isAvailable", out var availableValue) && availableValue.ValueKind == JsonValueKind.True;
+                var deliveryType = item.TryGetProperty("delivery", out var delivery)
+                                   && delivery.TryGetProperty("type", out var typeValue)
+                    ? typeValue.GetString() ?? string.Empty
+                    : types.FirstOrDefault() ?? _settings.DefaultDeliveryType;
+
+                slots.Add((new SilpoDeliveryTimeSlot
+                {
+                    Start = start,
+                    End = end,
+                    DeliveryType = deliveryType
+                }, available));
+            }
+
+            if (slots.Count == 0)
+            {
+                return new List<SilpoDeliveryTimeSlot>();
+            }
+
+            var availableSlots = slots.Where(slot => slot.Available).Select(slot => slot.Slot).ToList();
+            return availableSlots.Count > 0 ? availableSlots : slots.Select(slot => slot.Slot).ToList();
+        }
+
         public async Task UpdateCartAsync(
             string cartId,
             SilpoCartUpdate update,
@@ -409,7 +474,7 @@ namespace BuyAndCook.Infrastructure.Integrations
         private async Task SendJsonAsync<TPayload>(HttpMethod method, string url, TPayload payload, CancellationToken cancellationToken)
         {
             using var response = await SendJsonRequestAsync(method, url, payload, cancellationToken);
-            response.EnsureSuccessStatusCode();
+            await EnsureSuccessAsync(response);
         }
 
         private async Task<TResponse> SendJsonAsync<TPayload, TResponse>(
@@ -419,7 +484,7 @@ namespace BuyAndCook.Infrastructure.Integrations
             CancellationToken cancellationToken)
         {
             using var response = await SendJsonRequestAsync(method, url, payload, cancellationToken);
-            response.EnsureSuccessStatusCode();
+            await EnsureSuccessAsync(response);
             await using var stream = await response.Content.ReadAsStreamAsync();
             var result = await JsonSerializer.DeserializeAsync<TResponse>(stream, _jsonOptions, cancellationToken);
             if (result == null)
@@ -443,6 +508,17 @@ namespace BuyAndCook.Infrastructure.Integrations
             };
 
             return await _httpClient.SendAsync(request, cancellationToken);
+        }
+
+        private static async Task EnsureSuccessAsync(HttpResponseMessage response)
+        {
+            if (response.IsSuccessStatusCode)
+            {
+                return;
+            }
+
+            var body = await response.Content.ReadAsStringAsync();
+            throw new HttpRequestException($"Silpo API request failed with {(int)response.StatusCode} {response.ReasonPhrase}. Body: {body}");
         }
 
         private static SilpoBranchPolygon? ParsePolygon(JsonElement root)

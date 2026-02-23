@@ -115,6 +115,10 @@
             <h2>Meal Plan</h2>
             <p>@(_selectedIds.Count == 0 ? "Select recipes to build a menu" : $"{_selectedIds.Count} selected")</p>
         </div>
+        @if (!string.IsNullOrWhiteSpace(_mealPlanError))
+        {
+            <div class="error">@_mealPlanError</div>
+        }
         <div class="plan">
             @if (_recipes != null && _selectedIds.Count > 0)
             {
@@ -392,6 +396,7 @@
     private readonly List<string> _cartLinkSkipped = new();
     private string _cartLinkError = string.Empty;
     private string _cartLinkStatus = string.Empty;
+    private string _mealPlanError = string.Empty;
     private string _silpoError = string.Empty;
     private bool _isInteractive;
 
@@ -438,7 +443,16 @@
             _selectedIds.Add(id);
         }
 
-        await SaveMealPlanAsync();
+        _mealPlanError = string.Empty;
+        try
+        {
+            await SaveMealPlanAsync();
+        }
+        catch (Exception ex)
+        {
+            _mealPlanError = "Unable to save meal plan.";
+            Console.WriteLine($"Meal plan save failed: {ex.Message}");
+        }
     }
 
     private async Task GenerateShoppingList()
@@ -679,7 +693,11 @@
         try
         {
             var suggestions = await SilpoLocationService.SearchAddressesAsync(_addressQuery);
-            _addressSuggestions.AddRange(suggestions);
+            var ordered = suggestions
+                .OrderByDescending(suggestion => !string.IsNullOrWhiteSpace(suggestion.HouseNumber))
+                .ThenBy(suggestion => suggestion.Address, StringComparer.OrdinalIgnoreCase)
+                .ToList();
+            _addressSuggestions.AddRange(ordered);
             if (_addressSuggestions.Count == 0)
             {
                 _locationStatus = "No addresses found.";
@@ -772,6 +790,12 @@
         {
             var deliveryType = _silpoSession?.DeliveryType ?? SilpoApiSettings.DefaultDeliveryType;
             var deliveryProvider = _silpoSession?.DeliveryProvider ?? SilpoApiSettings.DefaultDeliveryProvider;
+            var timeslot = await ResolveTimeslotAsync(_selectedBranch.BranchId, deliveryType);
+            if (timeslot == null)
+            {
+                _silpoError = "No delivery timeslots available.";
+                return;
+            }
             var draft = new SilpoCartDraft
             {
                 Address = new SilpoCartAddress
@@ -787,6 +811,7 @@
                 },
                 DeliveryType = deliveryType,
                 DeliveryProvider = deliveryProvider,
+                Timeslot = timeslot,
                 Shipments = new List<SilpoCartShipment>
                 {
                     new SilpoCartShipment
@@ -851,6 +876,12 @@
         {
             var deliveryType = _silpoSession?.DeliveryType ?? SilpoApiSettings.DefaultDeliveryType;
             var deliveryProvider = _silpoSession?.DeliveryProvider ?? SilpoApiSettings.DefaultDeliveryProvider;
+            var timeslot = await ResolveTimeslotAsync(_selectedBranch.BranchId, deliveryType);
+            if (timeslot == null)
+            {
+                _cartLinkError = "No delivery timeslots available.";
+                return;
+            }
 
             var draft = new SilpoCartDraft
             {
@@ -867,6 +898,7 @@
                 },
                 DeliveryType = deliveryType,
                 DeliveryProvider = deliveryProvider,
+                Timeslot = timeslot,
                 Shipments = new List<SilpoCartShipment>
                 {
                     new SilpoCartShipment
@@ -945,9 +977,10 @@
             _cart = await SilpoCartService.GetCartAsync(cartId);
             _cartLinkStatus = BuildCartLinkStatus(added, _cartLinkSkipped);
         }
-        catch
+        catch (Exception ex)
         {
-            _cartLinkError = "Unable to build Silpo cart.";
+            _cartLinkError = $"Unable to build Silpo cart. {ex.Message}";
+            Console.WriteLine($"Silpo cart link build failed: {ex.Message}");
         }
         finally
         {
@@ -1204,6 +1237,34 @@
         return GetCartItems().Sum(item => item.Total);
     }
 
+    private async Task<SilpoCartTimeslot?> ResolveTimeslotAsync(string branchId, string deliveryType)
+    {
+        if (string.IsNullOrWhiteSpace(branchId))
+        {
+            return null;
+        }
+
+        try
+        {
+            var slots = await SilpoCartService.GetDeliveryTimeSlotsAsync(branchId, new[] { deliveryType });
+            var slot = slots.FirstOrDefault();
+            if (slot == null)
+            {
+                return null;
+            }
+
+            return new SilpoCartTimeslot
+            {
+                Start = slot.Start,
+                End = slot.End
+            };
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
     private async Task SaveSilpoSessionAsync(string? deliveryType = null, string? cartId = null)
     {
         var location = _selectedAddress == null
@@ -1228,7 +1289,19 @@
             CartId = cartId ?? _silpoSession?.CartId
         };
 
-        await SilpoSessionRepository.SaveSessionAsync(_silpoSession);
+        try
+        {
+            await SilpoSessionRepository.SaveSessionAsync(_silpoSession);
+        }
+        catch (Exception ex)
+        {
+            if (string.IsNullOrWhiteSpace(_silpoError))
+            {
+                _silpoError = "Unable to save Silpo session.";
+            }
+
+            Console.WriteLine($"Silpo session save failed: {ex.Message}");
+        }
     }
 
     private string? GetCartShareUrl()

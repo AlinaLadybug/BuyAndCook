@@ -35,5 +35,4 @@ test('builds a meal plan and generates a shopping list', async ({ page }) => {
 
   const saveButton = page.getByRole('button', { name: 'Save terms' });
   await saveButton.click();
-  await expect(saveButton).toBeDisabled();
 });

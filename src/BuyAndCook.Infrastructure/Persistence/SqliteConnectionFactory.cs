@@ -16,11 +16,25 @@ namespace BuyAndCook.Infrastructure.Persistence
             {
                 Directory.CreateDirectory(directory);
             }
+
+            if (File.Exists(_databasePath))
+            {
+                var attributes = File.GetAttributes(_databasePath);
+                if (attributes.HasFlag(FileAttributes.ReadOnly))
+                {
+                    File.SetAttributes(_databasePath, attributes & ~FileAttributes.ReadOnly);
+                }
+            }
         }
 
         public SqliteConnection CreateConnection()
         {
-            var connection = new SqliteConnection($"Data Source={_databasePath}");
+            var builder = new SqliteConnectionStringBuilder
+            {
+                DataSource = _databasePath,
+                Mode = SqliteOpenMode.ReadWriteCreate
+            };
+            var connection = new SqliteConnection(builder.ToString());
             connection.Open();
             return connection;
         }
