@@ -1,7 +1,17 @@
 ﻿@inherits LayoutComponentBase
 
-<div class="page">
+<div class="page theme-@_theme">
     <main class="content">
+        <div class="theme-switcher">
+            <span class="theme-label">Design</span>
+            <select class="theme-select" @bind="_theme">
+                <option value="harvest">Harvest Editorial</option>
+                <option value="nordic">Nordic Minimal</option>
+                <option value="pop">Playful Pop</option>
+                <option value="metro">Metro Brutalist</option>
+                <option value="noir">Noir Luxe</option>
+            </select>
+        </div>
         @Body
     </main>
 </div>
@@ -11,3 +21,7 @@
     <a href="." class="reload">Reload</a>
     <span class="dismiss">🗙</span>
 </div>
+
+@code {
+    private string _theme = "harvest";
+}
