@@ -201,6 +201,15 @@
                         <button class="btn outline" @onclick="CopySilpoBasketAsync">Copy</button>
                     </div>
                 }
+                @if (!string.IsNullOrWhiteSpace(GetSilpoRestoreBookmarklet()))
+                {
+                    <div class="meta">Silpo web restore:</div>
+                    <p class="meta">Silpo keeps carts in browser storage. Drag the bookmarklet to your bookmarks bar, then open `silpo.ua/basket` and run it there.</p>
+                    <div class="silpo-share-actions">
+                        <a class="link" data-testid="silpo-restore-bookmarklet-link" href="@GetSilpoRestoreBookmarklet()" @onclick:preventDefault="true">Drag to bookmarks bar</a>
+                        <button class="btn outline" data-testid="silpo-restore-bookmarklet-copy" data-bookmarklet="@GetSilpoRestoreBookmarklet()" @onclick="CopySilpoRestoreBookmarkletAsync">Copy restore bookmarklet</button>
+                    </div>
+                }
             }
             <div class="silpo-actions">
                 <button class="btn primary" @onclick="CreateSilpoCartLinkAsync" disabled="@(_cartLinkBusy || _shoppingList.Count == 0)">Create Silpo cart link</button>
@@ -323,6 +332,15 @@
                             <button class="btn outline" @onclick="OpenSilpoBasketAsync">Open</button>
                             <button class="btn outline" @onclick="CopySilpoBasketAsync">Copy</button>
                         </div>
+                        @if (!string.IsNullOrWhiteSpace(GetSilpoRestoreBookmarklet()))
+                        {
+                            <div class="meta">Silpo web restore:</div>
+                            <p class="meta">Drag the bookmarklet to your bookmarks bar, then open `silpo.ua/basket` and run it there to load this exact cart.</p>
+                            <div class="silpo-share-actions">
+                                <a class="link" data-testid="silpo-restore-bookmarklet-link" href="@GetSilpoRestoreBookmarklet()" @onclick:preventDefault="true">Drag to bookmarks bar</a>
+                                <button class="btn outline" data-testid="silpo-restore-bookmarklet-copy" data-bookmarklet="@GetSilpoRestoreBookmarklet()" @onclick="CopySilpoRestoreBookmarkletAsync">Copy restore bookmarklet</button>
+                            </div>
+                        }
                     </div>
                 }
                 else
@@ -1315,6 +1333,29 @@
         return $"{baseUri}/silpo/cart/{_cart.Id}";
     }
 
+    private string? GetSilpoRestoreBookmarklet()
+    {
+        if (_cart == null || string.IsNullOrWhiteSpace(_cart.Id))
+        {
+            return null;
+        }
+
+        var branchId = GetSilpoRestoreBranchId();
+        if (string.IsNullOrWhiteSpace(branchId))
+        {
+            return null;
+        }
+
+        return SilpoWebCartRestore.BuildBookmarklet(_cart.Id, branchId, SilpoApiSettings.BasketUrl);
+    }
+
+    private string? GetSilpoRestoreBranchId()
+    {
+        return _cart?.Shipments.FirstOrDefault(shipment => !string.IsNullOrWhiteSpace(shipment.BranchId))?.BranchId
+               ?? _selectedBranch?.BranchId
+               ?? _silpoSession?.BranchId;
+    }
+
     private async Task OpenCartShareLinkAsync()
     {
         var url = GetCartShareUrl();
@@ -1335,6 +1376,18 @@
         }
 
         await ClipboardService.SetTextAsync(url);
+    }
+
+    private async Task CopySilpoRestoreBookmarkletAsync()
+    {
+        var bookmarklet = GetSilpoRestoreBookmarklet();
+        if (string.IsNullOrWhiteSpace(bookmarklet))
+        {
+            return;
+        }
+
+        await ClipboardService.SetTextAsync(bookmarklet);
+        _cartLinkStatus = "Silpo restore bookmarklet copied.";
     }
 
     private async Task OpenSilpoBasketAsync()

@@ -2,6 +2,9 @@
 @using BuyAndCook.Application.Abstractions
 @using BuyAndCook.Application.Models.Silpo
 @using System.Globalization
+@inject IClipboardService ClipboardService
+@inject IExternalLinkService ExternalLinkService
+@inject SilpoApiSettings SilpoApiSettings
 @inject ISilpoCartService SilpoCartService
 
 <PageTitle>Silpo Cart</PageTitle>
@@ -48,6 +51,26 @@
                 </div>
                 <div class="silpo-cart-total">Total: @GetCartTotal().ToString("0.##", CultureInfo.InvariantCulture)</div>
             </div>
+            @if (!string.IsNullOrWhiteSpace(SilpoApiSettings.BasketUrl))
+            {
+                <div class="silpo-share">
+                    <div class="meta">Silpo basket:</div>
+                    <a class="link" href="@SilpoApiSettings.BasketUrl" target="_blank" rel="noopener">@SilpoApiSettings.BasketUrl</a>
+                    <div class="silpo-share-actions">
+                        <button class="btn outline" @onclick="OpenSilpoBasketAsync">Open</button>
+                        <button class="btn outline" @onclick="CopySilpoBasketAsync">Copy</button>
+                    </div>
+                    @if (!string.IsNullOrWhiteSpace(GetSilpoRestoreBookmarklet()))
+                    {
+                        <div class="meta">Silpo web restore:</div>
+                        <p class="meta">Drag the bookmarklet to your bookmarks bar, then open `silpo.ua/basket` and run it there to load this exact cart.</p>
+                        <div class="silpo-share-actions">
+                            <a class="link" data-testid="silpo-restore-bookmarklet-link" href="@GetSilpoRestoreBookmarklet()" @onclick:preventDefault="true">Drag to bookmarks bar</a>
+                            <button class="btn outline" data-testid="silpo-restore-bookmarklet-copy" data-bookmarklet="@GetSilpoRestoreBookmarklet()" @onclick="CopySilpoRestoreBookmarkletAsync">Copy restore bookmarklet</button>
+                        </div>
+                    }
+                </div>
+            }
         }
     </section>
 </div>
@@ -99,5 +122,52 @@
     private decimal GetCartTotal()
     {
         return GetCartItems().Sum(item => item.Total);
+    }
+
+    private string? GetSilpoRestoreBookmarklet()
+    {
+        if (_cart == null || string.IsNullOrWhiteSpace(_cart.Id))
+        {
+            return null;
+        }
+
+        var branchId = _cart.Shipments.FirstOrDefault(shipment => !string.IsNullOrWhiteSpace(shipment.BranchId))?.BranchId;
+        if (string.IsNullOrWhiteSpace(branchId))
+        {
+            return null;
+        }
+
+        return SilpoWebCartRestore.BuildBookmarklet(_cart.Id, branchId, SilpoApiSettings.BasketUrl);
+    }
+
+    private async Task OpenSilpoBasketAsync()
+    {
+        if (string.IsNullOrWhiteSpace(SilpoApiSettings.BasketUrl))
+        {
+            return;
+        }
+
+        await ExternalLinkService.OpenAsync(SilpoApiSettings.BasketUrl);
+    }
+
+    private async Task CopySilpoBasketAsync()
+    {
+        if (string.IsNullOrWhiteSpace(SilpoApiSettings.BasketUrl))
+        {
+            return;
+        }
+
+        await ClipboardService.SetTextAsync(SilpoApiSettings.BasketUrl);
+    }
+
+    private async Task CopySilpoRestoreBookmarkletAsync()
+    {
+        var bookmarklet = GetSilpoRestoreBookmarklet();
+        if (string.IsNullOrWhiteSpace(bookmarklet))
+        {
+            return;
+        }
+
+        await ClipboardService.SetTextAsync(bookmarklet);
     }
 }
