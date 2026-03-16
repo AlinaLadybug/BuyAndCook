@@ -1,4 +1,5 @@
 using BuyAndCook.Application.Abstractions;
+using BuyAndCook.Application.Models.Metro;
 using BuyAndCook.Application.Models.Silpo;
 using BuyAndCook.Application.Services;
 using BuyAndCook.Infrastructure.Integrations;
@@ -26,10 +27,13 @@ builder.Services.AddSingleton<IIngredientMappingRepository, SqliteIngredientMapp
 builder.Services.AddSingleton<ISilpoSessionRepository, SqliteSilpoSessionRepository>();
 
 builder.Services.AddSingleton<IGroceryProvider, SilpoGroceryProvider>();
+builder.Services.AddSingleton<IGroceryProvider, MetroGroceryProvider>();
 builder.Services.AddSingleton<IGroceryProviderRegistry, GroceryProviderRegistry>();
 
 var silpoSettings = builder.Configuration.GetSection("SilpoApi").Get<SilpoApiSettings>() ?? new SilpoApiSettings();
 builder.Services.AddSingleton(silpoSettings);
+var metroSettings = builder.Configuration.GetSection("MetroApi").Get<MetroApiSettings>() ?? new MetroApiSettings();
+builder.Services.AddSingleton(metroSettings);
 var useStubSilpo = builder.Configuration.GetValue<bool>("SilpoApi:UseStub");
 if (useStubSilpo)
 {
@@ -46,6 +50,10 @@ else
     builder.Services.AddSingleton<ISilpoProductSearchService>(sp => sp.GetRequiredService<SilpoApiClient>());
     builder.Services.AddSingleton<ISilpoCartService>(sp => sp.GetRequiredService<SilpoApiClient>());
 }
+
+builder.Services.AddSingleton<MetroApiClient>(sp =>
+    new MetroApiClient(new HttpClient(), sp.GetRequiredService<MetroApiSettings>()));
+builder.Services.AddSingleton<IMetroCartService>(sp => sp.GetRequiredService<MetroApiClient>());
 
 var app = builder.Build();
 

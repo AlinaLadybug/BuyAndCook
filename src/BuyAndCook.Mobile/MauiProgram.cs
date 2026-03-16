@@ -1,4 +1,5 @@
 ﻿using BuyAndCook.Application.Abstractions;
+using BuyAndCook.Application.Models.Metro;
 using BuyAndCook.Application.Models.Silpo;
 using BuyAndCook.Application.Services;
 using BuyAndCook.Data;
@@ -42,13 +43,18 @@ public static class MauiProgram
 		builder.Services.AddSingleton<ISilpoSessionRepository, SqliteSilpoSessionRepository>();
 
 		builder.Services.AddSingleton<IGroceryProvider, SilpoGroceryProvider>();
+		builder.Services.AddSingleton<IGroceryProvider, MetroGroceryProvider>();
 		builder.Services.AddSingleton<IGroceryProviderRegistry, GroceryProviderRegistry>();
 		builder.Services.AddSingleton(new SilpoApiSettings());
+		builder.Services.AddSingleton(new MetroApiSettings());
 		builder.Services.AddSingleton(new HttpClient());
 		builder.Services.AddSingleton<SilpoApiClient>();
 		builder.Services.AddSingleton<ISilpoLocationService>(sp => sp.GetRequiredService<SilpoApiClient>());
 		builder.Services.AddSingleton<ISilpoProductSearchService>(sp => sp.GetRequiredService<SilpoApiClient>());
 		builder.Services.AddSingleton<ISilpoCartService>(sp => sp.GetRequiredService<SilpoApiClient>());
+		builder.Services.AddSingleton<MetroApiClient>(sp =>
+			new MetroApiClient(new HttpClient(), sp.GetRequiredService<MetroApiSettings>()));
+		builder.Services.AddSingleton<IMetroCartService>(sp => sp.GetRequiredService<MetroApiClient>());
 
 #if DEBUG
 		builder.Logging.AddDebug();

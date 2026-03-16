@@ -22,7 +22,7 @@ test('builds a meal plan and generates a shopping list', async ({ page }) => {
   const shoppingItems = page.locator('.shopping li');
   await expect(shoppingItems.first()).toBeVisible();
 
-  const queries = page.locator('.queries');
+  const queries = page.getByTestId('silpo-queries');
   await expect(queries).toBeVisible();
 
   const mappingHeading = page.getByRole('heading', { name: 'Silpo search terms' });
