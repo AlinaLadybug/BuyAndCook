@@ -1,0 +1,172 @@
+@page "/metro/cart/{CartId}"
+@using BuyAndCook.Application.Abstractions
+@using BuyAndCook.Application.Models.Metro
+@using System.Globalization
+@inject IClipboardService ClipboardService
+@inject IExternalLinkService ExternalLinkService
+@inject IMetroCartService MetroCartService
+@inject MetroApiSettings MetroApiSettings
+
+<PageTitle>Metro Cart</PageTitle>
+
+<div class="app">
+    <header class="hero">
+        <div class="hero-copy">
+            <p class="eyebrow">Metro cart viewer</p>
+            <h1>Metro Cart</h1>
+            <p class="subtitle">Review the products added to your Metro cart.</p>
+        </div>
+        <div class="hero-chip">Cart</div>
+    </header>
+
+    <section class="section">
+        <div class="section-head">
+            <h2>Cart details</h2>
+            <p>@(string.IsNullOrWhiteSpace(CartId) ? "No cart id" : $"Cart ID: {CartId}")</p>
+        </div>
+
+        @if (_loading)
+        {
+            <div class="loading">Loading cart…</div>
+        }
+        else if (!string.IsNullOrWhiteSpace(_error))
+        {
+            <div class="error">@_error</div>
+        }
+        else if (_cart == null)
+        {
+            <div class="empty">Cart not found.</div>
+        }
+        else
+        {
+            <div class="silpo-cart">
+                <div class="silpo-cart-items">
+                    @foreach (var item in _cart.Items)
+                    {
+                        <div class="silpo-cart-item">
+                            <span>@item.Description</span>
+                            <span>@item.Quantity.ToString("0.###", CultureInfo.InvariantCulture) × @item.BundleSize</span>
+                        </div>
+                    }
+                </div>
+            </div>
+
+            <div class="silpo-share">
+                @if (!string.IsNullOrWhiteSpace(MetroApiSettings.BasketUrl))
+                {
+                    <div class="meta">Metro basket:</div>
+                    <a class="link" href="@MetroApiSettings.BasketUrl" target="_blank" rel="noopener">@MetroApiSettings.BasketUrl</a>
+                    <div class="silpo-share-actions">
+                        <button class="btn outline" @onclick="OpenMetroBasketAsync">Open</button>
+                        <button class="btn outline" @onclick="CopyMetroBasketAsync">Copy</button>
+                    </div>
+                }
+
+                @if (!string.IsNullOrWhiteSpace(GetMetroRestoreBookmarklet()))
+                {
+                    <div class="meta">Metro web restore:</div>
+                    <p class="meta">Metro public UA checkout currently hides anonymous carts. Keep this bookmarklet for when Metro re-enables the flow or for internal testing on `shop.metro.ua`.</p>
+                    <div class="silpo-share-actions">
+                        <a class="link" data-testid="metro-restore-bookmarklet-link" href="@GetMetroRestoreBookmarklet()" @onclick:preventDefault="true">Drag to bookmarks bar</a>
+                        <button class="btn outline" data-testid="metro-restore-bookmarklet-copy" data-bookmarklet="@GetMetroRestoreBookmarklet()" @onclick="CopyMetroRestoreBookmarkletAsync">Copy restore bookmarklet</button>
+                    </div>
+                }
+            </div>
+        }
+    </section>
+</div>
+
+@code {
+    [Parameter]
+    public string? CartId { get; set; }
+
+    [SupplyParameterFromQuery]
+    public string? StoreId { get; set; }
+
+    [SupplyParameterFromQuery]
+    public string? AnonUserId { get; set; }
+
+    private MetroCart? _cart;
+    private bool _loading;
+    private string _error = string.Empty;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (string.IsNullOrWhiteSpace(CartId) ||
+            string.IsNullOrWhiteSpace(StoreId) ||
+            string.IsNullOrWhiteSpace(AnonUserId))
+        {
+            _error = "Cart context is missing.";
+            _cart = null;
+            return;
+        }
+
+        _loading = true;
+        _error = string.Empty;
+
+        try
+        {
+            _cart = await MetroCartService.GetCartAsync(CartId, StoreId, AnonUserId);
+            if (_cart == null)
+            {
+                _error = "Cart not found or expired.";
+            }
+        }
+        catch
+        {
+            _error = "Unable to load cart.";
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private string? GetMetroRestoreBookmarklet()
+    {
+        if (_cart == null ||
+            string.IsNullOrWhiteSpace(_cart.Id) ||
+            string.IsNullOrWhiteSpace(_cart.StoreId) ||
+            string.IsNullOrWhiteSpace(_cart.AnonUserId))
+        {
+            return null;
+        }
+
+        return MetroWebCartRestore.BuildBookmarklet(
+            _cart.Id,
+            _cart.StoreId,
+            _cart.AnonUserId,
+            MetroApiSettings.BasketUrl);
+    }
+
+    private async Task OpenMetroBasketAsync()
+    {
+        if (string.IsNullOrWhiteSpace(MetroApiSettings.BasketUrl))
+        {
+            return;
+        }
+
+        await ExternalLinkService.OpenAsync(MetroApiSettings.BasketUrl);
+    }
+
+    private async Task CopyMetroBasketAsync()
+    {
+        if (string.IsNullOrWhiteSpace(MetroApiSettings.BasketUrl))
+        {
+            return;
+        }
+
+        await ClipboardService.SetTextAsync(MetroApiSettings.BasketUrl);
+    }
+
+    private async Task CopyMetroRestoreBookmarkletAsync()
+    {
+        var bookmarklet = GetMetroRestoreBookmarklet();
+        if (string.IsNullOrWhiteSpace(bookmarklet))
+        {
+            return;
+        }
+
+        await ClipboardService.SetTextAsync(bookmarklet);
+    }
+}

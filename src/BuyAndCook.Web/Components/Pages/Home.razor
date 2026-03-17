@@ -1,0 +1,1728 @@
+﻿@page "/"
+@using BuyAndCook.Application.Abstractions
+@using BuyAndCook.Application.Models.Metro
+@using BuyAndCook.Application.Models.Silpo
+@using BuyAndCook.Application.Services
+@using BuyAndCook.Domain.Models
+@using System.Globalization
+@using System.Linq
+@inject IRecipeProvider RecipeProvider
+@inject ShoppingListGenerator ShoppingListGenerator
+@inject IGroceryProviderRegistry GroceryProviderRegistry
+@inject IExternalLinkService ExternalLinkService
+@inject IClipboardService ClipboardService
+@inject IMealPlanRepository MealPlanRepository
+@inject IIngredientMappingRepository IngredientMappingRepository
+@inject ISilpoLocationService SilpoLocationService
+@inject ISilpoProductSearchService SilpoProductSearchService
+@inject ISilpoCartService SilpoCartService
+@inject IMetroCartService MetroCartService
+@inject ISilpoSessionRepository SilpoSessionRepository
+@inject MetroApiSettings MetroApiSettings
+@inject SilpoApiSettings SilpoApiSettings
+@inject NavigationManager NavigationManager
+
+<PageTitle>Buy and Cook</PageTitle>
+
+<div class="app">
+    <header class="hero">
+        <div class="hero-copy">
+            <p class="eyebrow">Meal planning • Shopping list • Silpo export</p>
+            <h1>Buy and Cook</h1>
+            <p class="subtitle">Curated Cookpad-inspired recipes for a fast, practical weekly menu.</p>
+        </div>
+        <div class="hero-chip">MVP</div>
+    </header>
+
+    @if (_isInteractive)
+    {
+        <div data-testid="interactive-ready" style="display: none;"></div>
+    }
+
+    <section class="section">
+        <div class="section-head">
+            <h2>Recipes</h2>
+            <p>@(_recipes == null ? "Loading…" : $"{_recipes.Count} recipes")</p>
+        </div>
+
+        @if (_recipes == null)
+        {
+            <div class="loading">Loading recipes…</div>
+        }
+        else
+        {
+            <div class="grid">
+                @foreach (var recipe in _recipes)
+                {
+                    <article class="card">
+                        @if (!string.IsNullOrWhiteSpace(recipe.ImageUrl))
+                        {
+                            <img class="card-image" src="@recipe.ImageUrl" alt="@recipe.Name" />
+                        }
+                        else
+                        {
+                            <div class="card-image placeholder"></div>
+                        }
+                        <div class="card-body">
+                            <h3>@recipe.Name</h3>
+                            <p class="meta">@recipe.Ingredients.Count ingredients • @recipe.Steps.Count steps</p>
+                            <div class="card-actions">
+                                <button class="btn @GetToggleClass(recipe.Id)" @onclick="() => ToggleRecipeAsync(recipe.Id)">
+                                    @GetToggleLabel(recipe.Id)
+                                </button>
+                                <button class="btn outline" @onclick="() => SelectRecipe(recipe)">Details</button>
+                                <a class="link" href="@recipe.SourceUrl" target="_blank" rel="noopener">Open on Cookpad</a>
+                            </div>
+                        </div>
+                    </article>
+                }
+            </div>
+        }
+    </section>
+
+    @if (_activeRecipe != null)
+    {
+        <section class="section">
+            <div class="section-head">
+                <h2>Recipe Detail</h2>
+                <button class="btn outline" @onclick="ClearRecipe">Close</button>
+            </div>
+            <div class="detail-card">
+                <h3>@_activeRecipe.Name</h3>
+                <div class="detail-grid">
+                    <div>
+                        <h4>Ingredients</h4>
+                        <ul>
+                            @foreach (var ingredient in _activeRecipe.Ingredients)
+                            {
+                                <li>@FormatIngredient(ingredient)</li>
+                            }
+                        </ul>
+                    </div>
+                    <div>
+                        <h4>Steps</h4>
+                        <ol>
+                            @foreach (var step in _activeRecipe.Steps)
+                            {
+                                <li>@step</li>
+                            }
+                        </ol>
+                    </div>
+                </div>
+            </div>
+        </section>
+    }
+
+    <section class="section">
+        <div class="section-head">
+            <h2>Meal Plan</h2>
+            <p>@(_selectedIds.Count == 0 ? "Select recipes to build a menu" : $"{_selectedIds.Count} selected")</p>
+        </div>
+        @if (!string.IsNullOrWhiteSpace(_mealPlanError))
+        {
+            <div class="error">@_mealPlanError</div>
+        }
+        <div class="plan">
+            @if (_recipes != null && _selectedIds.Count > 0)
+            {
+                <ul>
+                    @foreach (var recipe in _recipes.Where(r => _selectedIds.Contains(r.Id)))
+                    {
+                        <li>@recipe.Name</li>
+                    }
+                </ul>
+            }
+            else
+            {
+                <div class="empty">No recipes selected yet.</div>
+            }
+        </div>
+    </section>
+
+    <section class="section">
+        <div class="section-head">
+            <h2>Shopping List</h2>
+            <button class="btn primary" @onclick="GenerateShoppingList" disabled="@(_selectedIds.Count == 0)">Generate</button>
+        </div>
+        <div class="shopping">
+            @if (_shoppingList.Count == 0)
+            {
+                <div class="empty">Generate a shopping list from your menu.</div>
+            }
+            else
+            {
+                <ul>
+                    @foreach (var item in _shoppingList)
+                    {
+                        <li>@FormatIngredient(item)</li>
+                    }
+                </ul>
+            }
+        </div>
+        <div class="silpo">
+            <div>
+                <h3>Send to Silpo</h3>
+                <p>Export your list to Silpo web catalog for quick item search.</p>
+                @if (!string.IsNullOrWhiteSpace(_silpoQueries))
+                {
+                    <div class="queries" data-testid="silpo-queries">@_silpoQueries</div>
+                }
+            </div>
+            <div class="silpo-actions">
+                <button class="btn outline" @onclick="CopySilpoQueries" disabled="@string.IsNullOrWhiteSpace(_silpoQueries)">Copy list</button>
+                <button class="btn outline" @onclick="OpenSilpo" disabled="@(_shoppingList.Count == 0)">Open Silpo</button>
+            </div>
+        </div>
+        <div class="silpo-card">
+            <h3>Silpo cart link</h3>
+            <p class="meta">Build a Silpo cart from your shopping list.</p>
+            @if (!string.IsNullOrWhiteSpace(_cartLinkError))
+            {
+                <div class="error">@_cartLinkError</div>
+            }
+            @if (!string.IsNullOrWhiteSpace(_cartLinkStatus))
+            {
+                <div class="meta">@_cartLinkStatus</div>
+            }
+            @if (!string.IsNullOrWhiteSpace(_cartLinkStatus) && HasCart && _cart != null)
+            {
+                <div class="meta">Cart link:</div>
+                @if (!string.IsNullOrWhiteSpace(GetCartShareUrl()))
+                {
+                    <a class="link" href="@GetCartShareUrl()" target="_blank" rel="noopener">@GetCartShareUrl()</a>
+                }
+                <div class="silpo-share-actions">
+                    <button class="btn outline" @onclick="OpenCartShareLinkAsync">Open</button>
+                    <button class="btn outline" @onclick="CopyCartShareLinkAsync">Copy</button>
+                </div>
+                @if (!string.IsNullOrWhiteSpace(SilpoApiSettings.BasketUrl))
+                {
+                    <div class="meta">Silpo basket:</div>
+                    <a class="link" href="@SilpoApiSettings.BasketUrl" target="_blank" rel="noopener">@SilpoApiSettings.BasketUrl</a>
+                    <div class="silpo-share-actions">
+                        <button class="btn outline" @onclick="OpenSilpoBasketAsync">Open</button>
+                        <button class="btn outline" @onclick="CopySilpoBasketAsync">Copy</button>
+                    </div>
+                }
+                @if (!string.IsNullOrWhiteSpace(GetSilpoRestoreBookmarklet()))
+                {
+                    <div class="meta">Silpo web restore:</div>
+                    <p class="meta">Silpo keeps carts in browser storage. Drag the bookmarklet to your bookmarks bar, then open `silpo.ua/basket` and run it there.</p>
+                    <div class="silpo-share-actions">
+                        <a class="link" data-testid="silpo-restore-bookmarklet-link" href="@GetSilpoRestoreBookmarklet()" @onclick:preventDefault="true">Drag to bookmarks bar</a>
+                        <button class="btn outline" data-testid="silpo-restore-bookmarklet-copy" data-bookmarklet="@GetSilpoRestoreBookmarklet()" @onclick="CopySilpoRestoreBookmarkletAsync">Copy restore bookmarklet</button>
+                    </div>
+                }
+            }
+            <div class="silpo-actions">
+                <button class="btn primary" @onclick="CreateSilpoCartLinkAsync" disabled="@(_cartLinkBusy || _shoppingList.Count == 0)">Create Silpo cart link</button>
+            </div>
+        </div>
+        <div class="silpo">
+            <div>
+                <h3>Send to Metro</h3>
+                <p>Metro public UA web currently exposes product search, not a public anonymous checkout cart.</p>
+                @if (!string.IsNullOrWhiteSpace(_metroQueries))
+                {
+                    <div class="queries" data-testid="metro-queries">@_metroQueries</div>
+                }
+            </div>
+            <div class="silpo-actions">
+                <button class="btn outline" @onclick="CopyMetroQueries" disabled="@string.IsNullOrWhiteSpace(_metroQueries)">Copy list</button>
+                <button class="btn outline" @onclick="OpenMetro" disabled="@(_shoppingList.Count == 0)">Open Metro</button>
+            </div>
+        </div>
+        <div class="silpo-card">
+            <h3>Metro cart link</h3>
+            <p class="meta">Build a real Metro anonymous cart from your shopping list.</p>
+            @if (!MetroApiSettings.PublicAnonymousCartEnabled)
+            {
+                <div class="meta">Metro currently disables public anonymous-cart checkout on `shop.metro.ua` for UA, so use the internal cart viewer and Metro search fallback.</div>
+            }
+            @if (!string.IsNullOrWhiteSpace(_metroCartError))
+            {
+                <div class="error">@_metroCartError</div>
+            }
+            @if (!string.IsNullOrWhiteSpace(_metroCartStatus))
+            {
+                <div class="meta">@_metroCartStatus</div>
+            }
+            @if (_metroCart != null)
+            {
+                <div class="meta">Cart link:</div>
+                @if (!string.IsNullOrWhiteSpace(GetMetroCartShareUrl()))
+                {
+                    <a class="link" href="@GetMetroCartShareUrl()" target="_blank" rel="noopener">@GetMetroCartShareUrl()</a>
+                }
+                <div class="silpo-share-actions">
+                    <button class="btn outline" @onclick="OpenMetroCartShareLinkAsync">Open</button>
+                    <button class="btn outline" @onclick="CopyMetroCartShareLinkAsync">Copy</button>
+                </div>
+                @if (!string.IsNullOrWhiteSpace(MetroApiSettings.BasketUrl))
+                {
+                    <div class="meta">Metro basket:</div>
+                    <a class="link" href="@MetroApiSettings.BasketUrl" target="_blank" rel="noopener">@MetroApiSettings.BasketUrl</a>
+                    <div class="silpo-share-actions">
+                        <button class="btn outline" @onclick="OpenMetroBasketAsync">Open</button>
+                        <button class="btn outline" @onclick="CopyMetroBasketAsync">Copy</button>
+                    </div>
+                }
+                @if (!string.IsNullOrWhiteSpace(GetMetroRestoreBookmarklet()))
+                {
+                    <div class="meta">Metro web restore:</div>
+                    <p class="meta">This bookmarklet restores the exact Metro anonymous cart state on `shop.metro.ua`. Metro’s public UA site currently hides the cart UI, so treat this as an experimental handoff.</p>
+                    <div class="silpo-share-actions">
+                        <a class="link" data-testid="metro-restore-bookmarklet-link" href="@GetMetroRestoreBookmarklet()" @onclick:preventDefault="true">Drag to bookmarks bar</a>
+                        <button class="btn outline" data-testid="metro-restore-bookmarklet-copy" data-bookmarklet="@GetMetroRestoreBookmarklet()" @onclick="CopyMetroRestoreBookmarkletAsync">Copy restore bookmarklet</button>
+                    </div>
+                }
+            }
+            <div class="silpo-actions">
+                <button class="btn primary" data-testid="metro-cart-link-create" @onclick="CreateMetroCartLinkAsync" disabled="@(_metroCartBusy || _shoppingList.Count == 0)">Create Metro cart link</button>
+            </div>
+        </div>
+        @if (_silpoMappingEdits.Count > 0)
+        {
+            <div class="silpo-mapping">
+                <div class="mapping-head">
+                    <div>
+                        <h3>Silpo search terms</h3>
+                        <p>Adjust search terms and save them for faster repeat orders.</p>
+                    </div>
+                    <button class="btn outline" @onclick="SaveSilpoMappings" disabled="@(!_silpoMappingsDirty)">Save terms</button>
+                </div>
+                <div class="mapping-list">
+                    @foreach (var entry in _silpoMappingEdits)
+                    {
+                        <div class="mapping-item">
+                            <span>@entry.IngredientName</span>
+                            <input class="input" value="@entry.SearchTerm" @oninput="e => UpdateSilpoQuery(entry, e.Value?.ToString())" />
+                        </div>
+                    }
+                </div>
+            </div>
+        }
+    </section>
+
+    <section class="section">
+        <div class="section-head">
+            <h2>Silpo API</h2>
+            <p>Search products, create carts, and sync your nearest branch.</p>
+        </div>
+
+        @if (!string.IsNullOrWhiteSpace(_silpoError))
+        {
+            <div class="error">@_silpoError</div>
+        }
+
+        <div class="silpo-api">
+            <div class="silpo-card">
+                <h3>Location</h3>
+                <p class="meta">Find the nearest Silpo branch by address.</p>
+                <div class="silpo-form">
+                    <input class="input" placeholder="Enter address (city, street, house)" @bind="_addressQuery" />
+                    <button class="btn outline" @onclick="SearchAddressAsync" disabled="@(_locationBusy || string.IsNullOrWhiteSpace(_addressQuery))">Search</button>
+                </div>
+
+                @if (_addressSuggestions.Count > 0)
+                {
+                    <div class="silpo-suggestions">
+                        @foreach (var suggestion in _addressSuggestions)
+                        {
+                            <div class="silpo-suggestion">
+                                <div>
+                                    <div class="title">@suggestion.Address</div>
+                                    <div class="meta">@suggestion.City @suggestion.District</div>
+                                </div>
+                                <button class="btn outline" @onclick="() => SelectAddressAsync(suggestion)">Use</button>
+                            </div>
+                        }
+                    </div>
+                }
+
+                @if (_selectedAddress != null)
+                {
+                    <div class="silpo-selection">
+                        <div class="title">@_selectedAddress.Address</div>
+                        <div class="meta">@_selectedAddress.Latitude.ToString("F5", CultureInfo.InvariantCulture), @_selectedAddress.Longitude.ToString("F5", CultureInfo.InvariantCulture)</div>
+                        @if (_selectedBranch != null)
+                        {
+                            <div class="meta">Branch: @_selectedBranch.BranchId @(!string.IsNullOrWhiteSpace(_selectedBranch.AddressFull) ? $"- {_selectedBranch.AddressFull}" : string.Empty)</div>
+                        }
+                    </div>
+                }
+
+                @if (!string.IsNullOrWhiteSpace(_locationStatus))
+                {
+                    <div class="meta">@_locationStatus</div>
+                }
+            </div>
+
+            <div class="silpo-card">
+                <h3>Cart</h3>
+                <p class="meta">Create and refresh a Silpo cart for the selected branch.</p>
+                <div class="silpo-actions">
+                    <button class="btn primary" @onclick="CreateCartAsync" disabled="@(!CanCreateCart)">Create cart</button>
+                    <button class="btn outline" @onclick="RefreshCartAsync" disabled="@(!HasCart)">Refresh</button>
+                    <button class="btn outline" @onclick="ClearCartAsync" disabled="@(!HasCart)">Clear</button>
+                </div>
+
+                @if (HasCart && _cart != null)
+                {
+                    <div class="silpo-cart">
+                        <div class="meta">Cart ID: @_cart.Id</div>
+                        <div class="silpo-cart-items">
+                            @foreach (var item in GetCartItems())
+                            {
+                                <div class="silpo-cart-item">
+                                    <span>@item.Data.Title</span>
+                                    <span>@item.Quantity.ToString("0.##", CultureInfo.InvariantCulture) × @item.Price.ToString("0.##", CultureInfo.InvariantCulture)</span>
+                                </div>
+                            }
+                        </div>
+                        <div class="silpo-cart-total">Total: @GetCartTotal().ToString("0.##", CultureInfo.InvariantCulture)</div>
+                    </div>
+                    <div class="silpo-share">
+                        <div class="meta">Cart link:</div>
+                        @if (!string.IsNullOrWhiteSpace(GetCartShareUrl()))
+                        {
+                            <a class="link" href="@GetCartShareUrl()" target="_blank" rel="noopener">@GetCartShareUrl()</a>
+                        }
+                        <div class="silpo-share-actions">
+                            <button class="btn outline" @onclick="OpenCartShareLinkAsync">Open</button>
+                            <button class="btn outline" @onclick="CopyCartShareLinkAsync">Copy</button>
+                        </div>
+                        <div class="meta">Silpo basket:</div>
+                        <a class="link" href="@SilpoApiSettings.BasketUrl" target="_blank" rel="noopener">@SilpoApiSettings.BasketUrl</a>
+                        <div class="silpo-share-actions">
+                            <button class="btn outline" @onclick="OpenSilpoBasketAsync">Open</button>
+                            <button class="btn outline" @onclick="CopySilpoBasketAsync">Copy</button>
+                        </div>
+                        @if (!string.IsNullOrWhiteSpace(GetSilpoRestoreBookmarklet()))
+                        {
+                            <div class="meta">Silpo web restore:</div>
+                            <p class="meta">Drag the bookmarklet to your bookmarks bar, then open `silpo.ua/basket` and run it there to load this exact cart.</p>
+                            <div class="silpo-share-actions">
+                                <a class="link" data-testid="silpo-restore-bookmarklet-link" href="@GetSilpoRestoreBookmarklet()" @onclick:preventDefault="true">Drag to bookmarks bar</a>
+                                <button class="btn outline" data-testid="silpo-restore-bookmarklet-copy" data-bookmarklet="@GetSilpoRestoreBookmarklet()" @onclick="CopySilpoRestoreBookmarkletAsync">Copy restore bookmarklet</button>
+                            </div>
+                        }
+                    </div>
+                }
+                else
+                {
+                    <div class="empty">No cart loaded yet.</div>
+                }
+            </div>
+        </div>
+
+        <div class="silpo-card">
+            <h3>Product search</h3>
+            <div class="silpo-form">
+                <input class="input" placeholder="Search products in Silpo" @bind="_productQuery" />
+                <button class="btn outline" @onclick="SearchProductsAsync" disabled="@(_searchBusy || string.IsNullOrWhiteSpace(_productQuery))">Search</button>
+            </div>
+
+            @if (_productResults?.Items.Count > 0)
+            {
+                <div class="silpo-product-list">
+                    @foreach (var product in _productResults.Items)
+                    {
+                        <div class="silpo-product">
+                            @if (!string.IsNullOrWhiteSpace(product.ImageUrl))
+                            {
+                                <img src="@product.ImageUrl" alt="@product.Title" />
+                            }
+                            <div>
+                                <div class="title">@product.Title</div>
+                                <div class="meta">@(product.DisplayPrice?.ToString("0.##", CultureInfo.InvariantCulture) ?? "-") @product.DisplayRatio</div>
+                                <div class="meta">Stock: @product.Stock</div>
+                            </div>
+                            <div class="silpo-product-actions">
+                                <input class="input silpo-qty" type="number" min="@GetMinQuantity(product).ToString(CultureInfo.InvariantCulture)" step="@GetStepQuantity(product).ToString(CultureInfo.InvariantCulture)" value="@GetQuantityValue(product)" @oninput="e => UpdateQuantity(product, e.Value?.ToString())" />
+                                <button class="btn outline" @onclick="() => AddToCartAsync(product)" disabled="@(!HasCart || _cartBusy)">Add</button>
+                            </div>
+                        </div>
+                    }
+                </div>
+            }
+            else
+            {
+                <div class="empty">Search for products to add them to the cart.</div>
+            }
+        </div>
+    </section>
+</div>
+
+@code {
+    private List<Recipe>? _recipes;
+    private Recipe? _activeRecipe;
+    private readonly HashSet<string> _selectedIds = new();
+    private List<Ingredient> _shoppingList = new();
+    private GroceryExport? _silpoExport;
+    private string _silpoQueries = string.Empty;
+    private GroceryExport? _metroExport;
+    private string _metroQueries = string.Empty;
+    private readonly List<SilpoMappingEdit> _silpoMappingEdits = new();
+    private bool _silpoMappingsDirty;
+    private SilpoSession? _silpoSession;
+    private string _addressQuery = string.Empty;
+    private readonly List<SilpoAddressSuggestion> _addressSuggestions = new();
+    private SilpoAddressSuggestion? _selectedAddress;
+    private SilpoBranch? _selectedBranch;
+    private string _locationStatus = string.Empty;
+    private string _productQuery = string.Empty;
+    private SilpoProductSearchResult? _productResults;
+    private readonly Dictionary<string, decimal> _productQuantities = new();
+    private SilpoCart? _cart;
+    private bool _locationBusy;
+    private bool _searchBusy;
+    private bool _cartBusy;
+    private bool _cartLinkBusy;
+    private bool _metroCartBusy;
+    private readonly List<string> _cartLinkSkipped = new();
+    private readonly List<string> _metroCartSkipped = new();
+    private string _cartLinkError = string.Empty;
+    private string _cartLinkStatus = string.Empty;
+    private string _metroCartError = string.Empty;
+    private string _metroCartStatus = string.Empty;
+    private string _mealPlanError = string.Empty;
+    private string _silpoError = string.Empty;
+    private bool _isInteractive;
+    private MetroCart? _metroCart;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var recipes = await RecipeProvider.GetRecipesAsync();
+        _recipes = recipes.ToList();
+        var mealPlan = await MealPlanRepository.GetMealPlanAsync();
+        foreach (var item in mealPlan)
+        {
+            if (!string.IsNullOrWhiteSpace(item.RecipeId))
+            {
+                _selectedIds.Add(item.RecipeId);
+            }
+        }
+
+        await LoadSilpoSessionAsync();
+    }
+
+    protected override Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender && !_isInteractive)
+        {
+            _isInteractive = true;
+            StateHasChanged();
+        }
+
+        return Task.CompletedTask;
+    }
+
+    private async Task ToggleRecipeAsync(string id)
+    {
+        if (string.IsNullOrWhiteSpace(id) || _recipes == null)
+        {
+            return;
+        }
+
+        if (_selectedIds.Contains(id))
+        {
+            _selectedIds.Remove(id);
+        }
+        else
+        {
+            _selectedIds.Add(id);
+        }
+
+        _mealPlanError = string.Empty;
+        try
+        {
+            await SaveMealPlanAsync();
+        }
+        catch (Exception ex)
+        {
+            _mealPlanError = "Unable to save meal plan.";
+            Console.WriteLine($"Meal plan save failed: {ex.Message}");
+        }
+    }
+
+    private async Task GenerateShoppingList()
+    {
+        if (_recipes == null)
+        {
+            return;
+        }
+
+        var selectedRecipes = _recipes.Where(r => _selectedIds.Contains(r.Id)).ToList();
+        _shoppingList = ShoppingListGenerator.GenerateShoppingList(selectedRecipes);
+        _cartLinkStatus = string.Empty;
+        _cartLinkError = string.Empty;
+        _cartLinkSkipped.Clear();
+        _metroCart = null;
+        _metroCartError = string.Empty;
+        _metroCartStatus = string.Empty;
+        _metroCartSkipped.Clear();
+        await LoadSilpoMappingsAsync();
+        UpdateSilpoExport();
+        UpdateMetroExport();
+    }
+
+    private static string FormatIngredient(Ingredient ingredient)
+    {
+        if (string.IsNullOrWhiteSpace(ingredient.Unit))
+        {
+            return $"{ingredient.Quantity} {ingredient.Name}".Trim();
+        }
+
+        return $"{ingredient.Quantity} {ingredient.Unit} {ingredient.Name}".Trim();
+    }
+
+    private string GetToggleLabel(string id) => _selectedIds.Contains(id) ? "Remove" : "Add to plan";
+
+    private string GetToggleClass(string id) => _selectedIds.Contains(id) ? "secondary" : "primary";
+
+    private void SelectRecipe(Recipe recipe)
+    {
+        _activeRecipe = recipe;
+    }
+
+    private void ClearRecipe()
+    {
+        _activeRecipe = null;
+    }
+
+    private async Task OpenSilpo()
+    {
+        if (_silpoExport == null)
+        {
+            return;
+        }
+
+        await ExternalLinkService.OpenAsync(_silpoExport.CatalogUrl);
+    }
+
+    private async Task CopySilpoQueries()
+    {
+        if (string.IsNullOrWhiteSpace(_silpoQueries))
+        {
+            return;
+        }
+
+        await ClipboardService.SetTextAsync(_silpoQueries);
+    }
+
+    private async Task OpenMetro()
+    {
+        var url = GetMetroSearchUrl();
+        if (string.IsNullOrWhiteSpace(url))
+        {
+            return;
+        }
+
+        await ExternalLinkService.OpenAsync(url);
+    }
+
+    private async Task CopyMetroQueries()
+    {
+        if (string.IsNullOrWhiteSpace(_metroQueries))
+        {
+            return;
+        }
+
+        await ClipboardService.SetTextAsync(_metroQueries);
+    }
+
+    private void UpdateSilpoQuery(SilpoMappingEdit entry, string? value)
+    {
+        entry.SearchTerm = value ?? string.Empty;
+        _silpoMappingsDirty = true;
+        UpdateSilpoExport();
+    }
+
+    private async Task SaveSilpoMappings()
+    {
+        var provider = GetSilpoProvider();
+        if (provider == null || _silpoMappingEdits.Count == 0)
+        {
+            return;
+        }
+
+        foreach (var entry in _silpoMappingEdits)
+        {
+            var ingredientName = entry.IngredientName.Trim();
+            if (string.IsNullOrWhiteSpace(ingredientName))
+            {
+                continue;
+            }
+
+            var productName = string.IsNullOrWhiteSpace(entry.SearchTerm)
+                ? ingredientName
+                : entry.SearchTerm.Trim();
+
+            entry.SearchTerm = productName;
+
+            await IngredientMappingRepository.SaveMappingAsync(new IngredientMapping
+            {
+                ProviderId = provider.Id,
+                IngredientName = ingredientName,
+                ProductName = productName
+            });
+        }
+
+        _silpoMappingsDirty = false;
+        UpdateSilpoExport();
+        UpdateMetroExport();
+    }
+
+    private async Task LoadSilpoMappingsAsync()
+    {
+        _silpoMappingEdits.Clear();
+        _silpoMappingsDirty = false;
+
+        var provider = GetSilpoProvider();
+        if (provider == null || _shoppingList.Count == 0)
+        {
+            return;
+        }
+
+        var mappingLookup = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        var mappings = await IngredientMappingRepository.GetMappingsAsync(provider.Id);
+        foreach (var mapping in mappings)
+        {
+            if (string.IsNullOrWhiteSpace(mapping.IngredientName))
+            {
+                continue;
+            }
+
+            var ingredientName = mapping.IngredientName.Trim();
+            if (string.IsNullOrWhiteSpace(ingredientName))
+            {
+                continue;
+            }
+
+            var productName = string.IsNullOrWhiteSpace(mapping.ProductName)
+                ? ingredientName
+                : mapping.ProductName.Trim();
+
+            mappingLookup[ingredientName] = productName;
+        }
+
+        var ingredientNames = _shoppingList
+            .Select(item => item.Name?.Trim())
+            .Where(name => !string.IsNullOrWhiteSpace(name))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(name => name, StringComparer.OrdinalIgnoreCase);
+
+        foreach (var name in ingredientNames)
+        {
+            var normalized = name ?? string.Empty;
+            var searchTerm = mappingLookup.TryGetValue(normalized, out var mapped)
+                ? mapped
+                : normalized;
+
+            _silpoMappingEdits.Add(new SilpoMappingEdit
+            {
+                IngredientName = normalized,
+                SearchTerm = searchTerm
+            });
+        }
+    }
+
+    private void UpdateSilpoExport()
+    {
+        var provider = GetSilpoProvider();
+        if (provider == null || _shoppingList.Count == 0)
+        {
+            _silpoExport = null;
+            _silpoQueries = string.Empty;
+            return;
+        }
+
+        var queryIngredients = GetQueryIngredients();
+        _silpoExport = provider.BuildExport(queryIngredients);
+        _silpoQueries = _silpoExport == null ? string.Empty : string.Join("\n", _silpoExport.SearchQueries);
+    }
+
+    private void UpdateMetroExport()
+    {
+        var provider = GetMetroProvider();
+        if (provider == null || _shoppingList.Count == 0)
+        {
+            _metroExport = null;
+            _metroQueries = string.Empty;
+            return;
+        }
+
+        var queryIngredients = GetQueryIngredients();
+        _metroExport = provider.BuildExport(queryIngredients);
+        _metroQueries = _metroExport == null ? string.Empty : string.Join("\n", _metroExport.SearchQueries);
+    }
+
+    private IEnumerable<Ingredient> GetQueryIngredients()
+    {
+        return _silpoMappingEdits.Count == 0
+            ? _shoppingList
+            : _silpoMappingEdits
+                .Where(entry => !string.IsNullOrWhiteSpace(entry.SearchTerm))
+                .Select(entry => new Ingredient(entry.SearchTerm.Trim(), 1, string.Empty))
+                .ToList();
+    }
+
+    private IGroceryProvider? GetSilpoProvider()
+    {
+        return GroceryProviderRegistry.GetProvider("silpo");
+    }
+
+    private IGroceryProvider? GetMetroProvider()
+    {
+        return GroceryProviderRegistry.GetProvider("metro");
+    }
+
+    private bool HasCart => !string.IsNullOrWhiteSpace(_silpoSession?.CartId);
+
+    private bool CanCreateCart =>
+        !_cartBusy &&
+        _selectedAddress != null &&
+        !string.IsNullOrWhiteSpace(_selectedAddress.HouseNumber) &&
+        _selectedBranch != null;
+
+    private async Task LoadSilpoSessionAsync()
+    {
+        _silpoSession = await SilpoSessionRepository.GetSessionAsync();
+        if (_silpoSession?.Location != null)
+        {
+            _selectedAddress = new SilpoAddressSuggestion
+            {
+                Address = _silpoSession.Location.AddressLine,
+                City = _silpoSession.Location.City,
+                Street = _silpoSession.Location.Street,
+                HouseNumber = _silpoSession.Location.House,
+                District = _silpoSession.Location.District,
+                Latitude = _silpoSession.Location.Latitude,
+                Longitude = _silpoSession.Location.Longitude
+            };
+
+            _locationStatus = "Loaded saved location.";
+        }
+
+        if (!string.IsNullOrWhiteSpace(_silpoSession?.BranchId))
+        {
+            _selectedBranch = new SilpoBranch
+            {
+                BranchId = _silpoSession.BranchId ?? string.Empty,
+                CompanyId = SilpoApiSettings.CompanyId,
+                AddressFull = "Saved branch"
+            };
+        }
+
+        if (!string.IsNullOrWhiteSpace(_silpoSession?.CartId))
+        {
+            _cart = await SilpoCartService.GetCartAsync(_silpoSession.CartId ?? string.Empty);
+        }
+    }
+
+    private async Task SearchAddressAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_addressQuery))
+        {
+            return;
+        }
+
+        _locationBusy = true;
+        _silpoError = string.Empty;
+        _locationStatus = string.Empty;
+        _addressSuggestions.Clear();
+
+        try
+        {
+            var suggestions = await SilpoLocationService.SearchAddressesAsync(_addressQuery);
+            var ordered = suggestions
+                .OrderByDescending(suggestion => !string.IsNullOrWhiteSpace(suggestion.HouseNumber))
+                .ThenBy(suggestion => suggestion.Address, StringComparer.OrdinalIgnoreCase)
+                .ToList();
+            _addressSuggestions.AddRange(ordered);
+            if (_addressSuggestions.Count == 0)
+            {
+                _locationStatus = "No addresses found.";
+            }
+        }
+        catch
+        {
+            _silpoError = "Unable to search addresses.";
+        }
+        finally
+        {
+            _locationBusy = false;
+        }
+    }
+
+    private async Task SelectAddressAsync(SilpoAddressSuggestion suggestion)
+    {
+        _selectedAddress = suggestion;
+        _addressSuggestions.Clear();
+        _locationBusy = true;
+        _silpoError = string.Empty;
+        _locationStatus = "Resolving nearest branch...";
+
+        try
+        {
+            var polygon = await SilpoLocationService.FindBranchByCoordinatesAsync(suggestion.Latitude, suggestion.Longitude);
+            if (polygon != null && !string.IsNullOrWhiteSpace(polygon.BranchId))
+            {
+                _selectedBranch = new SilpoBranch
+                {
+                    BranchId = polygon.BranchId,
+                    CompanyId = SilpoApiSettings.CompanyId,
+                    AddressFull = polygon.BranchName
+                };
+            }
+            else
+            {
+                _selectedBranch = await SilpoLocationService.FindNearestBranchAsync(suggestion.Latitude, suggestion.Longitude);
+                if (_selectedBranch != null && string.IsNullOrWhiteSpace(_selectedBranch.CompanyId))
+                {
+                    _selectedBranch = new SilpoBranch
+                    {
+                        BranchId = _selectedBranch.BranchId,
+                        CompanyId = SilpoApiSettings.CompanyId,
+                        AddressFull = _selectedBranch.AddressFull,
+                        CityFull = _selectedBranch.CityFull,
+                        ExternalId = _selectedBranch.ExternalId,
+                        HasPickup = _selectedBranch.HasPickup,
+                        Latitude = _selectedBranch.Latitude,
+                        Longitude = _selectedBranch.Longitude,
+                        Open = _selectedBranch.Open
+                    };
+                }
+            }
+
+            _locationStatus = _selectedBranch == null
+                ? "No branch found for this location."
+                : $"Nearest branch: {_selectedBranch.BranchId}";
+
+            await SaveSilpoSessionAsync(polygon?.DeliveryType);
+        }
+        catch
+        {
+            _silpoError = "Unable to resolve branch.";
+        }
+        finally
+        {
+            _locationBusy = false;
+        }
+    }
+
+    private async Task CreateCartAsync()
+    {
+        if (_selectedAddress == null || _selectedBranch == null)
+        {
+            _silpoError = "Select a location before creating a cart.";
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(_selectedAddress.HouseNumber))
+        {
+            _silpoError = "Address must include a house number.";
+            return;
+        }
+
+        _cartBusy = true;
+        _silpoError = string.Empty;
+
+        try
+        {
+            var deliveryType = _silpoSession?.DeliveryType ?? SilpoApiSettings.DefaultDeliveryType;
+            var deliveryProvider = _silpoSession?.DeliveryProvider ?? SilpoApiSettings.DefaultDeliveryProvider;
+            var timeslot = await ResolveTimeslotAsync(_selectedBranch.BranchId, deliveryType);
+            if (timeslot == null)
+            {
+                _silpoError = "No delivery timeslots available.";
+                return;
+            }
+            var draft = new SilpoCartDraft
+            {
+                Address = new SilpoCartAddress
+                {
+                    City = _selectedAddress.City,
+                    Street = _selectedAddress.Street,
+                    House = _selectedAddress.HouseNumber,
+                    District = _selectedAddress.District,
+                    Latitude = _selectedAddress.Latitude,
+                    Longitude = _selectedAddress.Longitude,
+                    BranchIdWideassort = SilpoApiSettings.WideAssortBranchId,
+                    DeliveryProvider = deliveryProvider
+                },
+                DeliveryType = deliveryType,
+                DeliveryProvider = deliveryProvider,
+                Timeslot = timeslot,
+                Shipments = new List<SilpoCartShipment>
+                {
+                    new SilpoCartShipment
+                    {
+                        BranchId = _selectedBranch.BranchId,
+                        CompanyId = string.IsNullOrWhiteSpace(_selectedBranch.CompanyId)
+                            ? SilpoApiSettings.CompanyId
+                            : _selectedBranch.CompanyId
+                    }
+                }
+            };
+
+            var cartId = await SilpoCartService.CreateCartAsync(draft);
+            await SaveSilpoSessionAsync(deliveryType, cartId);
+            _cart = await SilpoCartService.GetCartAsync(cartId);
+        }
+        catch
+        {
+            _silpoError = "Unable to create cart.";
+        }
+        finally
+        {
+            _cartBusy = false;
+        }
+    }
+
+    private async Task CreateSilpoCartLinkAsync()
+    {
+        _cartLinkError = string.Empty;
+        _cartLinkStatus = string.Empty;
+
+        if (_shoppingList.Count == 0)
+        {
+            _cartLinkError = "Generate a shopping list first.";
+            return;
+        }
+
+        if (_selectedAddress == null || _selectedBranch == null)
+        {
+            _cartLinkError = "Select a location before building a cart.";
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(_selectedAddress.HouseNumber))
+        {
+            _cartLinkError = "Address must include a house number.";
+            return;
+        }
+
+        var searchTerms = BuildCartSearchTerms();
+        if (searchTerms.Count == 0)
+        {
+            _cartLinkError = "Shopping list has no items to search.";
+            return;
+        }
+
+        _cartLinkBusy = true;
+        _cartLinkStatus = "Creating cart and adding items...";
+        _cartLinkSkipped.Clear();
+
+        try
+        {
+            var deliveryType = _silpoSession?.DeliveryType ?? SilpoApiSettings.DefaultDeliveryType;
+            var deliveryProvider = _silpoSession?.DeliveryProvider ?? SilpoApiSettings.DefaultDeliveryProvider;
+            var timeslot = await ResolveTimeslotAsync(_selectedBranch.BranchId, deliveryType);
+            if (timeslot == null)
+            {
+                _cartLinkError = "No delivery timeslots available.";
+                return;
+            }
+
+            var draft = new SilpoCartDraft
+            {
+                Address = new SilpoCartAddress
+                {
+                    City = _selectedAddress.City,
+                    Street = _selectedAddress.Street,
+                    House = _selectedAddress.HouseNumber,
+                    District = _selectedAddress.District,
+                    Latitude = _selectedAddress.Latitude,
+                    Longitude = _selectedAddress.Longitude,
+                    BranchIdWideassort = SilpoApiSettings.WideAssortBranchId,
+                    DeliveryProvider = deliveryProvider
+                },
+                DeliveryType = deliveryType,
+                DeliveryProvider = deliveryProvider,
+                Timeslot = timeslot,
+                Shipments = new List<SilpoCartShipment>
+                {
+                    new SilpoCartShipment
+                    {
+                        BranchId = _selectedBranch.BranchId,
+                        CompanyId = string.IsNullOrWhiteSpace(_selectedBranch.CompanyId)
+                            ? SilpoApiSettings.CompanyId
+                            : _selectedBranch.CompanyId
+                    }
+                }
+            };
+
+            var cartId = await SilpoCartService.CreateCartAsync(draft);
+            await SaveSilpoSessionAsync(deliveryType, cartId);
+
+            var added = 0;
+            foreach (var term in searchTerms)
+            {
+                if (string.IsNullOrWhiteSpace(term.SearchTerm))
+                {
+                    continue;
+                }
+
+                SilpoProductSummary? product = null;
+                try
+                {
+                    var result = await SilpoProductSearchService.QuickSearchAsync(
+                        _selectedBranch.BranchId,
+                        term.SearchTerm,
+                        1,
+                        0,
+                        "productsList",
+                        "asc");
+
+                    product = result.Items.FirstOrDefault();
+                }
+                catch
+                {
+                    _cartLinkSkipped.Add(term.IngredientName);
+                    continue;
+                }
+
+                if (product == null)
+                {
+                    _cartLinkSkipped.Add(term.IngredientName);
+                    continue;
+                }
+
+                var quantity = product.Weighted
+                    ? product.AddToBasketStep > 0 ? product.AddToBasketStep : 0.1m
+                    : 1m;
+
+                var request = new SilpoCartProductRequest
+                {
+                    ProductId = product.Id,
+                    Quantity = quantity,
+                    BranchId = string.IsNullOrWhiteSpace(product.BranchId)
+                        ? _selectedBranch.BranchId
+                        : product.BranchId,
+                    CompanyId = string.IsNullOrWhiteSpace(product.CompanyId)
+                        ? SilpoApiSettings.CompanyId
+                        : product.CompanyId
+                };
+
+                try
+                {
+                    await SilpoCartService.AddProductsAsync(cartId, new[] { request });
+                    added++;
+                }
+                catch
+                {
+                    _cartLinkSkipped.Add(term.IngredientName);
+                }
+            }
+
+            _cart = await SilpoCartService.GetCartAsync(cartId);
+            _cartLinkStatus = BuildCartLinkStatus(added, _cartLinkSkipped);
+        }
+        catch (Exception ex)
+        {
+            _cartLinkError = $"Unable to build Silpo cart. {ex.Message}";
+            Console.WriteLine($"Silpo cart link build failed: {ex.Message}");
+        }
+        finally
+        {
+            _cartLinkBusy = false;
+        }
+    }
+
+    private IReadOnlyList<SilpoCartSearchTerm> BuildCartSearchTerms()
+    {
+        var results = new List<SilpoCartSearchTerm>();
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        if (_silpoMappingEdits.Count > 0)
+        {
+            foreach (var entry in _silpoMappingEdits)
+            {
+                if (string.IsNullOrWhiteSpace(entry.SearchTerm))
+                {
+                    continue;
+                }
+
+                var term = entry.SearchTerm.Trim();
+                if (!seen.Add(term))
+                {
+                    continue;
+                }
+
+                var ingredientName = string.IsNullOrWhiteSpace(entry.IngredientName)
+                    ? term
+                    : entry.IngredientName.Trim();
+
+                results.Add(new SilpoCartSearchTerm(ingredientName, term));
+            }
+        }
+        else
+        {
+            foreach (var item in _shoppingList)
+            {
+                if (string.IsNullOrWhiteSpace(item.Name))
+                {
+                    continue;
+                }
+
+                var term = item.Name.Trim();
+                if (!seen.Add(term))
+                {
+                    continue;
+                }
+
+                results.Add(new SilpoCartSearchTerm(term, term));
+            }
+        }
+
+        return results;
+    }
+
+    private static string BuildCartLinkStatus(int added, IReadOnlyCollection<string> skipped)
+    {
+        var addedLabel = added == 1 ? "1 item" : $"{added} items";
+        var status = $"Added {addedLabel} to Silpo cart.";
+
+        if (skipped.Count == 0)
+        {
+            return status;
+        }
+
+        var preview = string.Join(", ", skipped.Take(3));
+        if (skipped.Count > 3)
+        {
+            preview = $"{preview}...";
+        }
+
+        return $"{status} Skipped {skipped.Count}: {preview}.";
+    }
+
+    private async Task RefreshCartAsync()
+    {
+        if (!HasCart)
+        {
+            return;
+        }
+
+        _cart = await SilpoCartService.GetCartAsync(_silpoSession?.CartId ?? string.Empty);
+    }
+
+    private async Task ClearCartAsync()
+    {
+        _cart = null;
+        if (_silpoSession == null)
+        {
+            return;
+        }
+
+        _silpoSession = new SilpoSession
+        {
+            Location = _silpoSession.Location,
+            BranchId = _silpoSession.BranchId,
+            DeliveryType = _silpoSession.DeliveryType,
+            DeliveryProvider = _silpoSession.DeliveryProvider,
+            CartId = null
+        };
+
+        await SilpoSessionRepository.SaveSessionAsync(_silpoSession);
+        _cartLinkStatus = string.Empty;
+        _cartLinkError = string.Empty;
+        _cartLinkSkipped.Clear();
+    }
+
+    private async Task SearchProductsAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_productQuery))
+        {
+            return;
+        }
+
+        _searchBusy = true;
+        _silpoError = string.Empty;
+
+        try
+        {
+            var branchId = _selectedBranch?.BranchId
+                           ?? _silpoSession?.BranchId
+                           ?? SilpoApiSettings.DefaultBranchId;
+            _productResults = await SilpoProductSearchService.QuickSearchAsync(branchId, _productQuery, 20, 0, "productsList", "asc");
+            _productQuantities.Clear();
+            foreach (var product in _productResults.Items)
+            {
+                _productQuantities[product.Id] = GetMinQuantity(product);
+            }
+        }
+        catch
+        {
+            _silpoError = "Unable to search products.";
+        }
+        finally
+        {
+            _searchBusy = false;
+        }
+    }
+
+    private async Task AddToCartAsync(SilpoProductSummary product)
+    {
+        if (!HasCart)
+        {
+            _silpoError = "Create a cart before adding products.";
+            return;
+        }
+
+        var quantity = GetQuantity(product);
+        if (quantity <= 0)
+        {
+            _silpoError = "Quantity must be greater than zero.";
+            return;
+        }
+
+        _cartBusy = true;
+        _silpoError = string.Empty;
+
+        try
+        {
+            var request = new SilpoCartProductRequest
+            {
+                ProductId = product.Id,
+                Quantity = quantity,
+                BranchId = string.IsNullOrWhiteSpace(product.BranchId)
+                    ? _selectedBranch?.BranchId ?? _silpoSession?.BranchId ?? SilpoApiSettings.DefaultBranchId
+                    : product.BranchId,
+                CompanyId = string.IsNullOrWhiteSpace(product.CompanyId) ? SilpoApiSettings.CompanyId : product.CompanyId
+            };
+
+            await SilpoCartService.AddProductsAsync(_silpoSession?.CartId ?? string.Empty, new[] { request });
+            await RefreshCartAsync();
+        }
+        catch
+        {
+            _silpoError = "Unable to add product to cart.";
+        }
+        finally
+        {
+            _cartBusy = false;
+        }
+    }
+
+    private decimal GetQuantity(SilpoProductSummary product)
+    {
+        if (_productQuantities.TryGetValue(product.Id, out var quantity))
+        {
+            return quantity;
+        }
+
+        return GetMinQuantity(product);
+    }
+
+    private string GetQuantityValue(SilpoProductSummary product)
+    {
+        return GetQuantity(product).ToString("0.##", CultureInfo.InvariantCulture);
+    }
+
+    private decimal GetMinQuantity(SilpoProductSummary product)
+    {
+        if (product.Weighted)
+        {
+            return product.AddToBasketStep > 0 ? product.AddToBasketStep : 0.1m;
+        }
+
+        return 1m;
+    }
+
+    private decimal GetStepQuantity(SilpoProductSummary product)
+    {
+        if (product.Weighted)
+        {
+            return product.AddToBasketStep > 0 ? product.AddToBasketStep : 0.1m;
+        }
+
+        return 1m;
+    }
+
+    private void UpdateQuantity(SilpoProductSummary product, string? value)
+    {
+        if (string.IsNullOrWhiteSpace(product.Id))
+        {
+            return;
+        }
+
+        if (!TryParseDecimal(value, out var parsed))
+        {
+            return;
+        }
+
+        _productQuantities[product.Id] = parsed;
+    }
+
+    private static bool TryParseDecimal(string? value, out decimal parsed)
+    {
+        parsed = 0;
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return false;
+        }
+
+        return decimal.TryParse(value, NumberStyles.Any, CultureInfo.CurrentCulture, out parsed)
+               || decimal.TryParse(value, NumberStyles.Any, CultureInfo.InvariantCulture, out parsed);
+    }
+
+    private IReadOnlyList<SilpoCartItem> GetCartItems()
+    {
+        return _cart?.Shipments.SelectMany(shipment => shipment.Products).ToList()
+               ?? new List<SilpoCartItem>();
+    }
+
+    private decimal GetCartTotal()
+    {
+        return GetCartItems().Sum(item => item.Total);
+    }
+
+    private async Task<SilpoCartTimeslot?> ResolveTimeslotAsync(string branchId, string deliveryType)
+    {
+        if (string.IsNullOrWhiteSpace(branchId))
+        {
+            return null;
+        }
+
+        try
+        {
+            var slots = await SilpoCartService.GetDeliveryTimeSlotsAsync(branchId, new[] { deliveryType });
+            var slot = slots.FirstOrDefault();
+            if (slot == null)
+            {
+                return null;
+            }
+
+            return new SilpoCartTimeslot
+            {
+                Start = slot.Start,
+                End = slot.End
+            };
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private async Task SaveSilpoSessionAsync(string? deliveryType = null, string? cartId = null)
+    {
+        var location = _selectedAddress == null
+            ? _silpoSession?.Location
+            : new SilpoUserLocation
+            {
+                AddressLine = _selectedAddress.Address,
+                City = _selectedAddress.City,
+                Street = _selectedAddress.Street,
+                House = _selectedAddress.HouseNumber,
+                District = _selectedAddress.District,
+                Latitude = _selectedAddress.Latitude,
+                Longitude = _selectedAddress.Longitude
+            };
+
+        _silpoSession = new SilpoSession
+        {
+            Location = location,
+            BranchId = _selectedBranch?.BranchId ?? _silpoSession?.BranchId,
+            DeliveryType = deliveryType ?? _silpoSession?.DeliveryType ?? SilpoApiSettings.DefaultDeliveryType,
+            DeliveryProvider = _silpoSession?.DeliveryProvider ?? SilpoApiSettings.DefaultDeliveryProvider,
+            CartId = cartId ?? _silpoSession?.CartId
+        };
+
+        try
+        {
+            await SilpoSessionRepository.SaveSessionAsync(_silpoSession);
+        }
+        catch (Exception ex)
+        {
+            if (string.IsNullOrWhiteSpace(_silpoError))
+            {
+                _silpoError = "Unable to save Silpo session.";
+            }
+
+            Console.WriteLine($"Silpo session save failed: {ex.Message}");
+        }
+    }
+
+    private string? GetCartShareUrl()
+    {
+        if (_cart == null || string.IsNullOrWhiteSpace(_cart.Id))
+        {
+            return null;
+        }
+
+        var baseUri = NavigationManager.BaseUri.TrimEnd('/');
+        return $"{baseUri}/silpo/cart/{_cart.Id}";
+    }
+
+    private string? GetSilpoRestoreBookmarklet()
+    {
+        if (_cart == null || string.IsNullOrWhiteSpace(_cart.Id))
+        {
+            return null;
+        }
+
+        var branchId = GetSilpoRestoreBranchId();
+        if (string.IsNullOrWhiteSpace(branchId))
+        {
+            return null;
+        }
+
+        return SilpoWebCartRestore.BuildBookmarklet(_cart.Id, branchId, SilpoApiSettings.BasketUrl);
+    }
+
+    private string? GetSilpoRestoreBranchId()
+    {
+        return _cart?.Shipments.FirstOrDefault(shipment => !string.IsNullOrWhiteSpace(shipment.BranchId))?.BranchId
+               ?? _selectedBranch?.BranchId
+               ?? _silpoSession?.BranchId;
+    }
+
+    private async Task CreateMetroCartLinkAsync()
+    {
+        _metroCartError = string.Empty;
+        _metroCartStatus = string.Empty;
+        _metroCartSkipped.Clear();
+
+        if (_shoppingList.Count == 0)
+        {
+            _metroCartError = "Generate a shopping list first.";
+            return;
+        }
+
+        var searchTerms = BuildCartSearchTerms()
+            .Select(term => term.SearchTerm)
+            .Where(term => !string.IsNullOrWhiteSpace(term))
+            .ToList();
+
+        if (searchTerms.Count == 0)
+        {
+            _metroCartError = "Shopping list has no items to search.";
+            return;
+        }
+
+        _metroCartBusy = true;
+        _metroCartStatus = "Creating Metro cart and adding items...";
+
+        try
+        {
+            var result = await MetroCartService.BuildCartAsync(searchTerms);
+            _metroCart = result.Cart;
+            _metroCartSkipped.AddRange(result.SkippedTerms);
+            _metroCartStatus = BuildMetroCartLinkStatus(result);
+        }
+        catch (Exception ex)
+        {
+            _metroCartError = $"Unable to build Metro cart. {ex.Message}";
+            Console.WriteLine($"Metro cart link build failed: {ex.Message}");
+        }
+        finally
+        {
+            _metroCartBusy = false;
+        }
+    }
+
+    private string BuildMetroCartLinkStatus(MetroCartBuildResult result)
+    {
+        var addedLabel = result.AddedCount == 1 ? "1 item" : $"{result.AddedCount} items";
+        var status = $"Added {addedLabel} to Metro cart.";
+
+        if (result.SkippedTerms.Count > 0)
+        {
+            var preview = string.Join(", ", result.SkippedTerms.Take(3));
+            if (result.SkippedTerms.Count > 3)
+            {
+                preview = $"{preview}...";
+            }
+
+            status = $"{status} Skipped {result.SkippedTerms.Count}: {preview}.";
+        }
+
+        if (!MetroApiSettings.PublicAnonymousCartEnabled)
+        {
+            status = $"{status} Metro public UA checkout currently hides anonymous carts.";
+        }
+
+        return status;
+    }
+
+    private string? GetMetroCartShareUrl()
+    {
+        if (_metroCart == null ||
+            string.IsNullOrWhiteSpace(_metroCart.Id) ||
+            string.IsNullOrWhiteSpace(_metroCart.StoreId) ||
+            string.IsNullOrWhiteSpace(_metroCart.AnonUserId))
+        {
+            return null;
+        }
+
+        var baseUri = NavigationManager.BaseUri.TrimEnd('/');
+        return $"{baseUri}/metro/cart/{Uri.EscapeDataString(_metroCart.Id)}?storeId={Uri.EscapeDataString(_metroCart.StoreId)}&anonUserId={Uri.EscapeDataString(_metroCart.AnonUserId)}";
+    }
+
+    private string? GetMetroRestoreBookmarklet()
+    {
+        if (_metroCart == null ||
+            string.IsNullOrWhiteSpace(_metroCart.Id) ||
+            string.IsNullOrWhiteSpace(_metroCart.StoreId) ||
+            string.IsNullOrWhiteSpace(_metroCart.AnonUserId))
+        {
+            return null;
+        }
+
+        return MetroWebCartRestore.BuildBookmarklet(
+            _metroCart.Id,
+            _metroCart.StoreId,
+            _metroCart.AnonUserId,
+            MetroApiSettings.BasketUrl);
+    }
+
+    private string GetMetroSearchUrl()
+    {
+        var firstQuery = _metroExport?.SearchQueries.FirstOrDefault(query => !string.IsNullOrWhiteSpace(query));
+        if (string.IsNullOrWhiteSpace(firstQuery))
+        {
+            return MetroApiSettings.ShopUrl;
+        }
+
+        return $"{MetroApiSettings.ShopUrl.TrimEnd('/')}/search?q={Uri.EscapeDataString(firstQuery)}";
+    }
+
+    private async Task OpenCartShareLinkAsync()
+    {
+        var url = GetCartShareUrl();
+        if (string.IsNullOrWhiteSpace(url))
+        {
+            return;
+        }
+
+        await ExternalLinkService.OpenAsync(url);
+    }
+
+    private async Task CopyCartShareLinkAsync()
+    {
+        var url = GetCartShareUrl();
+        if (string.IsNullOrWhiteSpace(url))
+        {
+            return;
+        }
+
+        await ClipboardService.SetTextAsync(url);
+    }
+
+    private async Task OpenMetroCartShareLinkAsync()
+    {
+        var url = GetMetroCartShareUrl();
+        if (string.IsNullOrWhiteSpace(url))
+        {
+            return;
+        }
+
+        await ExternalLinkService.OpenAsync(url);
+    }
+
+    private async Task CopyMetroCartShareLinkAsync()
+    {
+        var url = GetMetroCartShareUrl();
+        if (string.IsNullOrWhiteSpace(url))
+        {
+            return;
+        }
+
+        await ClipboardService.SetTextAsync(url);
+    }
+
+    private async Task CopySilpoRestoreBookmarkletAsync()
+    {
+        var bookmarklet = GetSilpoRestoreBookmarklet();
+        if (string.IsNullOrWhiteSpace(bookmarklet))
+        {
+            return;
+        }
+
+        await ClipboardService.SetTextAsync(bookmarklet);
+        _cartLinkStatus = "Silpo restore bookmarklet copied.";
+    }
+
+    private async Task CopyMetroRestoreBookmarkletAsync()
+    {
+        var bookmarklet = GetMetroRestoreBookmarklet();
+        if (string.IsNullOrWhiteSpace(bookmarklet))
+        {
+            return;
+        }
+
+        await ClipboardService.SetTextAsync(bookmarklet);
+        _metroCartStatus = "Metro restore bookmarklet copied.";
+    }
+
+    private async Task OpenSilpoBasketAsync()
+    {
+        if (string.IsNullOrWhiteSpace(SilpoApiSettings.BasketUrl))
+        {
+            return;
+        }
+
+        await ExternalLinkService.OpenAsync(SilpoApiSettings.BasketUrl);
+    }
+
+    private async Task OpenMetroBasketAsync()
+    {
+        if (string.IsNullOrWhiteSpace(MetroApiSettings.BasketUrl))
+        {
+            return;
+        }
+
+        await ExternalLinkService.OpenAsync(MetroApiSettings.BasketUrl);
+    }
+
+    private async Task CopySilpoBasketAsync()
+    {
+        if (string.IsNullOrWhiteSpace(SilpoApiSettings.BasketUrl))
+        {
+            return;
+        }
+
+        await ClipboardService.SetTextAsync(SilpoApiSettings.BasketUrl);
+    }
+
+    private async Task CopyMetroBasketAsync()
+    {
+        if (string.IsNullOrWhiteSpace(MetroApiSettings.BasketUrl))
+        {
+            return;
+        }
+
+        await ClipboardService.SetTextAsync(MetroApiSettings.BasketUrl);
+    }
+
+    private sealed record SilpoCartSearchTerm(string IngredientName, string SearchTerm);
+
+    private sealed class SilpoMappingEdit
+    {
+        public string IngredientName { get; set; } = string.Empty;
+        public string SearchTerm { get; set; } = string.Empty;
+    }
+
+    private Task SaveMealPlanAsync()
+    {
+        if (_recipes == null)
+        {
+            return Task.CompletedTask;
+        }
+
+        var planItems = _recipes
+            .Where(recipe => _selectedIds.Contains(recipe.Id))
+            .Select((recipe, index) => new MealPlanItem
+            {
+                RecipeId = recipe.Id,
+                SortOrder = index
+            })
+            .ToList();
+
+        return MealPlanRepository.SaveMealPlanAsync(planItems);
+    }
+}
